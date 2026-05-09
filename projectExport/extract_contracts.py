@@ -8,7 +8,7 @@ warnings.filterwarnings('ignore', message='Workbook contains no default style')
 
 SOURCE_FILE = 'ejyExport0101_0331.xlsx'
 REF_FILE = '01-新点电子交易专区&项目跟进表（重要）.xlsx'
-OUTPUT_FILE = '合同汇总.xlsx'
+OUTPUT_FILE = '合同汇总0331.xlsx'
 
 # 按列索引定位 ejyExport.xlsx
 COL_CONTRACT = 20   # 合同编号
@@ -76,15 +76,17 @@ def _process_sheet(df, value_cols, cost_dict):
         if not cids:
             continue
 
-        # 在 ejyExport 中查找这组合同编号
+        # 在 ejyExport 中查找：待匹配数据被数组元素包含
         matched_cids = []
         total_cost = 0
         total_budget = 0
-        for cid in cids:
-            if cid in cost_dict:
-                matched_cids.append(cid)
-                total_cost += cost_dict[cid]['实际人工成本']
-                total_budget += cost_dict[cid]['任务预算使用']
+        for dict_cid in cost_dict:
+            for ref_cid in cids:
+                if dict_cid in ref_cid:
+                    matched_cids.append(dict_cid)
+                    total_cost += cost_dict[dict_cid]['实际人工成本']
+                    total_budget += cost_dict[dict_cid]['任务预算使用']
+                    break
 
         if matched_cids:
             grouped_cids.update(matched_cids)
