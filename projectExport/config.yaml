@@ -1,0 +1,14 @@
+date_range:
+  start_date: "2026-01-01"
+  end_date: "2026-03-31"
+
+output:
+  master_file: "ejyExport0101_0331.xlsx"
+
+# 分段导出配置：当时间跨度超过4个月时，将按指定月数分段导出并合并
+split_export:
+  segment_months: 2
+  projects:
+    - "新点电子交易平台"
+    - "江苏省限额以下电子交易平台"
+
