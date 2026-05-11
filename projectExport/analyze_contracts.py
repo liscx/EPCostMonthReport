@@ -6,7 +6,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 warnings.filterwarnings('ignore', message='Workbook contains no default style')
 
 INPUT_FILE = '合同汇总.xlsx'
-OUTPUT_FILE = '合同汇总.xlsx'
+OUTPUT_FILE = '合同汇总20260101-20260430.xlsx'
 
 
 def main():
