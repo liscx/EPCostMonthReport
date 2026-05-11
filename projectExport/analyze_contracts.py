@@ -1,12 +1,24 @@
 import sys
 import pandas as pd
 import warnings
-
+import yaml
+import os
+# 2025年数据匹配
 sys.stdout.reconfigure(encoding='utf-8')
 warnings.filterwarnings('ignore', message='Workbook contains no default style')
 
-INPUT_FILE = '合同汇总.xlsx'
-OUTPUT_FILE = '合同汇总20260101-20260430.xlsx'
+# 读取配置
+with open('config.yaml', 'r', encoding='utf-8') as f:
+    config = yaml.safe_load(f)
+
+start_date = config['date_range']['start_date']
+end_date = config['date_range']['end_date']
+start_str = start_date.replace('-', '')
+end_str = end_date.replace('-', '')
+
+# 输入输出文件配置
+INPUT_FILE = f'中间数据/合同汇总{start_str}-{end_str}.xlsx'
+OUTPUT_FILE = f'中间数据/合同汇总{start_str}-{end_str}.xlsx'
 
 
 def main():
@@ -15,7 +27,6 @@ def main():
 
     is_new = df['合同编号'].astype(str).str.startswith('C2026')
     df['专属属性'] = is_new.map({True: '新开', False: '历史'})
-    df['核定总额'] = is_new.map({True: 50000, False: None})
 
     new_count = is_new.sum()
     print(f"新开: {new_count} 个, 历史: {len(df) - new_count} 个")
