@@ -1,15 +1,27 @@
 import sys
 import pandas as pd
 import warnings
-
+import yaml
+# 合同汇总
 sys.stdout.reconfigure(encoding='utf-8')
 
 warnings.filterwarnings('ignore', message='Workbook contains no default style')
 
-SOURCE_FILE = 'ejyExport0101_0331.xlsx'
-REF_FILE = '01-新点电子交易专区&项目跟进表（重要）.xlsx'
-OUTPUT_FILE = '合同汇总0331.xlsx'
+# 读取配置生成文件名
+with open('config.yaml', 'r', encoding='utf-8') as f:
+    config = yaml.safe_load(f)
 
+start_date = config['date_range']['start_date']
+end_date = config['date_range']['end_date']
+start_str = start_date.replace('-', '')
+end_str = end_date.replace('-', '')
+
+import os
+SOURCE_FILE = f'源数据/export/ejyExport{start_str}-{end_str}.xlsx'
+REF_FILE = '源数据/新点电子交易专区&项目跟进表.xlsx'
+OUTPUT_FILE = f'中间数据/合同汇总{start_str}-{end_str}.xlsx'
+print(os.getcwd())
+print(os.path.exists('源数据/新点电子交易专区&项目跟进表.xlsx'))
 # 按列索引定位 ejyExport.xlsx
 COL_CONTRACT = 20   # 合同编号
 COL_COST = 12       # 实际人工成本
