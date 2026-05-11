@@ -2,7 +2,10 @@ import os
 import pandas as pd
 from openpyxl import load_workbook
 
+FILE = '源数据/export/ejyExport.xlsx'
+OUTPUT = None  # None则覆盖原文件
 
+# 数据透视表
 def create_pivot_table(df, project_name):
     """为单个项目创建数据透视表"""
     required_cols = ['合同编号', '任务类型', '任务预算使用']
@@ -31,13 +34,11 @@ def create_pivot_table(df, project_name):
 
 
 def main():
-    master_file = "ejyExport.xlsx"
-
-    if not os.path.exists(master_file):
-        print(f"文件 {master_file} 不存在")
+    if not os.path.exists(FILE):
+        print(f"文件 {FILE} 不存在")
         return
 
-    wb = load_workbook(master_file)
+    wb = load_workbook(FILE)
     sheet_names = wb.sheetnames
     print(f"共 {len(sheet_names)} 个项目待分析")
 
@@ -48,7 +49,7 @@ def main():
         print(f"\n处理第 {i}/{len(sheet_names)} 个项目: {sheet_name}")
 
         try:
-            df = pd.read_excel(master_file, sheet_name=sheet_name)
+            df = pd.read_excel(FILE, sheet_name=sheet_name)
 
             if df.empty:
                 print(f"  数据为空，跳过")
@@ -82,8 +83,9 @@ def main():
         except Exception as e:
             print(f"  处理失败: {e}")
 
-    wb.save(master_file)
-    print(f"\n分析完成！已更新文件: {master_file}")
+    output = OUTPUT if OUTPUT is not None else FILE
+    wb.save(output)
+    print(f"\n分析完成！已更新文件: {output}")
 
 
 if __name__ == "__main__":

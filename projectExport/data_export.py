@@ -300,7 +300,11 @@ def main():
     download_dir = os.path.join(os.getcwd(), "downloads")
     os.makedirs(download_dir, exist_ok=True)
 
-    master_file = config.get('output', {}).get('master_file', '汇总表.xlsx')
+    # 根据日期范围自动生成文件名
+    start_str = start_date.replace('-', '')
+    end_str = end_date.replace('-', '')
+    master_file = f'源数据/export/ejyExport{start_str}-{end_str}.xlsx'
+    os.makedirs('源数据/export', exist_ok=True)
     if os.path.exists(master_file):
         os.remove(master_file)
 
