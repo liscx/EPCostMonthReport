@@ -1,6 +1,6 @@
 date_range:
   start_date: "2026-01-01"
-  end_date: "2026-03-31"
+  end_date: "2026-04-30"
 
 split_export:
   segment_months: 2
