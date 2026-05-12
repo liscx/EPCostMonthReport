@@ -2,9 +2,11 @@ import sys
 import pandas as pd
 import warnings
 import yaml
-# 合同汇总
-sys.stdout.reconfigure(encoding='utf-8')
+import os
+import re
+from openpyxl.styles import PatternFill
 
+sys.stdout.reconfigure(encoding='utf-8')
 warnings.filterwarnings('ignore', message='Workbook contains no default style')
 
 # 读取配置生成文件名
@@ -16,12 +18,11 @@ end_date = config['date_range']['end_date']
 start_str = start_date.replace('-', '')
 end_str = end_date.replace('-', '')
 
-import os
 SOURCE_FILE = f'源数据/export/ejyExport{start_str}-{end_str}.xlsx'
-REF_FILE = '源数据/新点电子交易专区&项目跟进表.xlsx'
-OUTPUT_FILE = f'中间数据/合同汇总{start_str}-{end_str}.xlsx'
-print(os.getcwd())
-print(os.path.exists('源数据/新点电子交易专区&项目跟进表.xlsx'))
+REF_FILE = '源数据/合同汇总表.xlsx'
+REF_FILE_OLD = '源数据/新点电子交易专区&项目跟进表.xlsx'
+OUTPUT_FILE = f'中间数据/合同汇总{start_str}-{end_str}--0512.xlsx'
+
 # 按列索引定位 ejyExport.xlsx
 COL_CONTRACT = 20   # 合同编号
 COL_COST = 12       # 实际人工成本
@@ -77,94 +78,241 @@ def load_contracts_from_ejy():
     return cost_dict
 
 
-def _process_sheet(df, value_cols, cost_dict):
-    """处理一个参考sheet：按行拆分合同编号，同单元格的合同合计为一行"""
-    grouped_rows = []
-    grouped_cids = set()
-
-    for _, row in df.iterrows():
-        raw = str(row['ref_contract'])
-        cids = [c.strip() for c in raw.split('\n') if c.strip()]
-        if not cids:
-            continue
-
-        # 在 ejyExport 中查找：待匹配数据被数组元素包含
-        matched_cids = []
-        total_cost = 0
-        total_budget = 0
-        for dict_cid in cost_dict:
-            for ref_cid in cids:
-                if dict_cid in ref_cid:
-                    matched_cids.append(dict_cid)
-                    total_cost += cost_dict[dict_cid]['实际人工成本']
-                    total_budget += cost_dict[dict_cid]['任务预算使用']
-                    break
-
-        if matched_cids:
-            grouped_cids.update(matched_cids)
-            info = {col: str(row[col]) if pd.notna(row[col]) else '' for col in value_cols}
-            grouped_rows.append({
-                '合同编号': '\n'.join(matched_cids),
-                '实际人工成本': round(total_cost, 2),
-                '任务预算使用': round(total_budget, 2),
-                **info,
-            })
-
-    return grouped_rows, grouped_cids
+def load_contract_summary():
+    """从合同汇总表加载数据，返回 DataFrame"""
+    print(f"\n读取合同汇总表: {REF_FILE}")
+    df = pd.read_excel(REF_FILE)
+    print(f"  行数: {len(df)}, 列数: {len(df.columns)}")
+    return df
 
 
-def match_reference(cost_dict):
-    """从参考文件匹配：同单元格多合同合计为一行，拼接合同编号"""
-    print(f"\n读取参考文件: {REF_FILE}")
+def parse_contract_ids(contract_id):
+    """解析合同编号，处理各种格式：换行符分隔、直接连接等"""
+    # 先按换行符分割
+    lines = [c.strip() for c in contract_id.split('\n') if c.strip()]
 
-    # 专区管控表
-    df_zone = pd.read_excel(REF_FILE, sheet_name='专区管控表', header=0, usecols=[0, 2, 5, 11])
-    df_zone.columns = ['ref_contract', '专区名称', '省份（已按新组织调整）', '商务']
+    all_cids = []
+    for line in lines:
+        # 检查是否是多个合同编号直接连接的情况（如 C2024120035C2026020017）
+        matches = re.findall(r'C\d{10}', line)
+        if matches:
+            all_cids.extend(matches)
+        elif line.startswith('C') and len(line) == 12:
+            all_cids.append(line)
+
+    return all_cids
+
+
+def match_contracts(cost_dict, summary_df):
+    """按照合同汇总表顺序匹配，返回 (matched, unmatched_red)
+    - matched: ejyExport和合同汇总表都能匹配到的行
+    - unmatched_red: 合同汇总表有但ejyExport没有的行（红色底纹）
+    """
+    matched_rows = []
+    unmatched_red_rows = []
+
+    # 从旧参考文件构建合同编号到专区码的映射
+    df_zone = pd.read_excel(REF_FILE_OLD, sheet_name='专区管控表', header=0, usecols=[0, 1, 2, 5, 11])
+    df_zone.columns = ['ref_contract', '专区码', '专区名称', '分公司', '商务']
     df_zone = df_zone.dropna(subset=['ref_contract'])
     df_zone['ref_contract'] = df_zone['ref_contract'].astype(str)
-    zone_cols = ['省份（已按新组织调整）', '专区名称', '商务']
-    zone_rows, zone_cids = _process_sheet(df_zone, zone_cols, cost_dict)
-    print(f"  专区管控表: {len(zone_rows)} 组, 覆盖 {len(zone_cids)} 个合同编号")
 
-    # 落地项目
-    df_proj = pd.read_excel(REF_FILE, sheet_name='落地项目', header=0, usecols=[0, 1, 2, 3, 4])
-    df_proj.columns = ['ref_contract', '项目名称', '分公司', '地区', '负责人']
-    df_proj = df_proj.dropna(subset=['ref_contract'])
-    df_proj['ref_contract'] = df_proj['ref_contract'].astype(str)
-    proj_cols = ['项目名称', '分公司', '地区', '负责人']
-    proj_rows, proj_cids = _process_sheet(df_proj, proj_cols, cost_dict)
-    print(f"  落地项目: {len(proj_rows)} 组, 覆盖 {len(proj_cids)} 个合同编号")
+    cid_to_zone = {}
+    for _, ref_row in df_zone.iterrows():
+        ref_contract = str(ref_row['ref_contract'])
+        zone_code = str(ref_row['专区码']) if pd.notna(ref_row['专区码']) else ''
+        for cid in ref_contract.split('\n'):
+            cid = cid.strip()
+            if cid and cid.startswith('C'):
+                cid_to_zone[cid] = zone_code
 
-    return zone_rows, zone_cids, proj_rows, proj_cids
+    print(f"  旧参考文件专区码映射数量: {len(cid_to_zone)}")
+
+    # 按合同汇总表顺序遍历
+    for _, row in summary_df.iterrows():
+        contract_id = str(row['合同编号']).strip() if pd.notna(row['合同编号']) else ''
+        if not contract_id:
+            continue
+
+        cids = parse_contract_ids(contract_id)
+        if not cids:
+            # 无法解析，作为红色（合同汇总表有，ejyExport无）
+            unmatched_red_rows.append({
+                '合同编号': contract_id,
+                '实际人工成本': '',
+                '预算使用': '',
+                '分公司': '',
+                '专区名称': str(row['专区名称']) if pd.notna(row.get('专区名称', '')) else '',
+                '商务': str(row['商务']) if pd.notna(row.get('商务', '')) else '',
+                '专区码': '',
+                '核定总额': row.get('核定总额', ''),
+                '25年收益': row.get('25年收益', ''),
+                '核定总额计算规则': str(row.get('核定总额计算规则', '')) if pd.notna(row.get('核定总额计算规则', '')) else '',
+            })
+            continue
+
+        # 在 ejyExport 中查找
+        matched_cids_in_row = []
+        total_budget = 0
+        for cid in cids:
+            if cid in cost_dict:
+                matched_cids_in_row.append(cid)
+                total_budget += cost_dict[cid]['任务预算使用']
+
+        # 获取分公司
+        branch = ''
+        if '分公司' in row.index:
+            branch = str(row['分公司']) if pd.notna(row['分公司']) else ''
+        elif '省份（已按新组织调整）' in row.index:
+            branch = str(row['省份（已按新组织调整）']) if pd.notna(row['省份（已按新组织调整）']) else ''
+
+        # 从旧参考文件获取专区码
+        zone_code = ''
+        for cid in cids:
+            if cid in cid_to_zone:
+                zone_code = cid_to_zone[cid]
+                break
+
+        if matched_cids_in_row:
+            # 匹配成功
+            matched_rows.append({
+                '合同编号': '\n'.join(matched_cids_in_row),
+                '实际人工成本': sum(cost_dict[cid]['实际人工成本'] for cid in matched_cids_in_row),
+                '预算使用': round(total_budget, 2),
+                '分公司': branch,
+                '专区名称': str(row['专区名称']) if pd.notna(row.get('专区名称', '')) else '',
+                '商务': str(row['商务']) if pd.notna(row.get('商务', '')) else '',
+                '专区码': zone_code,
+                '核定总额': row.get('核定总额', ''),
+                '25年收益': row.get('25年收益', ''),
+                '核定总额计算规则': str(row.get('核定总额计算规则', '')) if pd.notna(row.get('核定总额计算规则', '')) else '',
+            })
+        else:
+            # 合同汇总表有，ejyExport没有 -> 红色底纹
+            unmatched_red_rows.append({
+                '合同编号': contract_id,
+                '实际人工成本': '',
+                '预算使用': '',
+                '分公司': branch,
+                '专区名称': str(row['专区名称']) if pd.notna(row.get('专区名称', '')) else '',
+                '商务': str(row['商务']) if pd.notna(row.get('商务', '')) else '',
+                '专区码': zone_code,
+                '核定总额': row.get('核定总额', ''),
+                '25年收益': row.get('25年收益', ''),
+                '核定总额计算规则': str(row.get('核定总额计算规则', '')) if pd.notna(row.get('核定总额计算规则', '')) else '',
+            })
+
+    return matched_rows, unmatched_red_rows
+
+
+def match_unmatched_ejy(cost_dict, matched_in_summary, summary_df):
+    """处理 ejyExport 中未在合同汇总表匹配到的合同（黄色底纹），尝试从旧参考文件补充信息"""
+    print(f"\n处理 ejyExport 未匹配合同，参考旧文件: {REF_FILE_OLD}")
+
+    # 从旧参考文件构建合同编号到信息的映射
+    df_zone = pd.read_excel(REF_FILE_OLD, sheet_name='专区管控表', header=0, usecols=[0, 1, 2, 5, 11])
+    df_zone.columns = ['ref_contract', '专区码', '专区名称', '分公司', '商务']
+    df_zone = df_zone.dropna(subset=['ref_contract'])
+    df_zone['ref_contract'] = df_zone['ref_contract'].astype(str)
+
+    cid_to_info = {}
+    for _, ref_row in df_zone.iterrows():
+        ref_contract = str(ref_row['ref_contract'])
+        zone_code = str(ref_row['专区码']) if pd.notna(ref_row['专区码']) else ''
+        for cid in ref_contract.split('\n'):
+            cid = cid.strip()
+            if cid and cid.startswith('C'):
+                cid_to_info[cid] = {
+                    '专区码': zone_code,
+                    '专区名称': str(ref_row['专区名称']) if pd.notna(ref_row['专区名称']) else '',
+                    '分公司': str(ref_row['分公司']) if pd.notna(ref_row['分公司']) else '',
+                    '商务': str(ref_row['商务']) if pd.notna(ref_row['商务']) else '',
+                }
+
+    # 收集合同汇总表中已匹配的合同编号集合（用于排除）
+    summary_cids = set()
+    for _, row in summary_df.iterrows():
+        contract_id = str(row['合同编号']).strip() if pd.notna(row['合同编号']) else ''
+        if contract_id:
+            cids = parse_contract_ids(contract_id)
+            summary_cids.update(cids)
+
+    yellow_rows = []
+    for cid, costs in cost_dict.items():
+        if cid in summary_cids:
+            continue  # 已在合同汇总表中匹配过，跳过
+
+        info = cid_to_info.get(cid, {})
+        yellow_rows.append({
+            '合同编号': cid,
+            '实际人工成本': costs['实际人工成本'],
+            '预算使用': costs['任务预算使用'],
+            '分公司': info.get('分公司', ''),
+            '专区名称': info.get('专区名称', ''),
+            '商务': info.get('商务', ''),
+            '专区码': info.get('专区码', ''),
+            '核定总额': '',
+            '25年收益': '',
+            '核定总额计算规则': '',
+        })
+
+    print(f"  ejyExport 未匹配: {len(yellow_rows)} 行")
+    return yellow_rows
 
 
 def main():
+    # 加载 ejyExport 数据（主数据源）
     cost_dict = load_contracts_from_ejy()
     if cost_dict is None:
         return
 
-    zone_rows, zone_cids, proj_rows, proj_cids = match_reference(cost_dict)
+    # 加载合同汇总表（参考数据）
+    summary_df = load_contract_summary()
 
-    # 收集已被参考文件匹配走的合同编号
-    covered_cids = zone_cids | proj_cids
+    # 第一步：按合同汇总表顺序匹配
+    # matched_rows: 两边都能匹配到
+    # unmatched_red_rows: 合同汇总表有，ejyExport没有（红色底纹）
+    matched_rows, unmatched_red_rows = match_contracts(cost_dict, summary_df)
 
-    # 未匹配的合同：单独一行
-    unmatched_rows = []
-    for cid, costs in cost_dict.items():
-        if cid not in covered_cids:
-            unmatched_rows.append({
-                '合同编号': cid,
-                '实际人工成本': costs['实际人工成本'],
-                '任务预算使用': costs['任务预算使用'],
-            })
-    if unmatched_rows:
-        print(f"\n未匹配参考文件的合同: {len(unmatched_rows)} 个")
+    print(f"\n合同汇总表匹配结果:")
+    print(f"  匹配成功（绿色）: {len(matched_rows)} 行")
+    print(f"  合同汇总表未匹配（红色）: {len(unmatched_red_rows)} 行")
 
-    # 合并所有行
-    all_rows = zone_rows + proj_rows + unmatched_rows
+    # 第二步：处理 ejyExport 中未在合同汇总表匹配到的合同（黄色底纹）
+    yellow_rows = match_unmatched_ejy(cost_dict, set(), summary_df)
+
+    # 合并：先按合同汇总表顺序（匹配+红色），再追加黄色
+    all_rows = matched_rows + unmatched_red_rows + yellow_rows
     result = pd.DataFrame(all_rows)
 
-    result.to_excel(OUTPUT_FILE, index=False, sheet_name='合同汇总')
+    print(f"\n最终结果:")
+    print(f"  匹配成功（绿色）: {len(matched_rows)} 行")
+    print(f"  合同汇总表未匹配（红色）: {len(unmatched_red_rows)} 行")
+    print(f"  ejyExport 未匹配（黄色）: {len(yellow_rows)} 行")
+
+    # 写入Excel并添加底纹
+    with pd.ExcelWriter(OUTPUT_FILE, engine='openpyxl') as writer:
+        result.to_excel(writer, index=False, sheet_name='合同汇总')
+
+        workbook = writer.book
+        worksheet = workbook['合同汇总']
+
+        red_fill = PatternFill(start_color='FF0000', end_color='FF0000', fill_type='solid')
+        yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
+
+        matched_end = len(matched_rows)
+        red_end = matched_end + len(unmatched_red_rows)
+
+        # 红色：合同汇总表有，ejyExport没有
+        for row_idx in range(matched_end + 2, red_end + 2):
+            for col_idx in range(1, len(result.columns) + 1):
+                worksheet.cell(row=row_idx, column=col_idx).fill = red_fill
+
+        # 黄色：ejyExport有，合同汇总表没有
+        for row_idx in range(red_end + 2, len(result) + 2):
+            for col_idx in range(1, len(result.columns) + 1):
+                worksheet.cell(row=row_idx, column=col_idx).fill = yellow_fill
+
     print(f"\n导出完成: {OUTPUT_FILE}")
     print(f"总行数: {len(result)}")
 
