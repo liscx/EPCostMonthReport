@@ -64,18 +64,25 @@ def calc_quota(row):
 
 
 
-# 计算核定总额和计算规则
-df[['核定总额', '核定总额计算规则']] = df.apply(calc_quota, axis=1, result_type='expand')
+# 只计算核定总额为空的数据
+mask = df['核定总额'].isna() | (df['核定总额'] == '')
+
+# 记录原始核定总额有值的数量
+existing_count = len(df) - mask.sum()
+
+# 计算核定总额和计算规则（仅对空值计算）
+if mask.any():
+    df.loc[mask, ['核定总额', '核定总额计算规则']] = df[mask].apply(calc_quota, axis=1, result_type='expand')
 
 # 保存结果
-
 df.to_excel(output_file, index=False)
 
 print(f'计算完成，结果已保存到: {output_file}')
 print(f'\n统计信息:')
 print(f'总记录数: {len(df)}')
+print(f'已有核定总额（跳过）: {existing_count}条')
+print(f'本次计算核定总额: {mask.sum()}条')
 print(f'核定总额为50000的(2026年新开): {len(df[df["核定总额"] == 50000])}条')
 print(f'核定总额为32000的(保底): {len(df[df["核定总额"] == 32000])}条')
-print(f'核定总额为0的(无收益): {len(df[df["核定总额"] == 0])}条')
-print(f'其他核定总额: {len(df[(df["核定总额"] != 0) & (df["核定总额"] != 32000) & (df["核定总额"] != 50000)])}条')
+print(f'其他核定总额: {len(df[(df["核定总额"] != 32000) & (df["核定总额"] != 50000)])}条')
 
