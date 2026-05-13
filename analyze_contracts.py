@@ -4,6 +4,7 @@ import warnings
 import yaml
 import os
 import json
+import openpyxl
 from datetime import datetime
 # 数据匹配
 sys.stdout.reconfigure(encoding='utf-8')
@@ -35,14 +36,16 @@ end_date = config['date_range']['end_date']
 start_str = start_date.replace('-', '')
 end_str = end_date.replace('-', '')
 
-# 输入输出文件配置
-INPUT_FILE = f'中间数据/合同汇总{start_str}-{end_str}_fixx.xlsx'
-OUTPUT_FILE = f'中间数据/合同汇总{start_str}-{end_str}_fixx.xlsx'
-
 
 def main():
-    df = pd.read_excel(INPUT_FILE)
-    print(f"读取: {INPUT_FILE}, 共 {len(df)} 条记录")
+    # 文件路径：支持 workflow 时间戳
+    ts = os.environ.get('WORKFLOW_TIMESTAMP', '')
+    suffix = f'_{ts}' if ts else ''
+    input_file = f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx'
+    output_file = input_file  # 原地更新
+
+    df = pd.read_excel(input_file)
+    print(f"读取: {input_file}, 共 {len(df)} 条记录")
 
     is_new = df['合同编号'].astype(str).str.startswith(CURRENT_CONTRACT_PREFIX)
     df['专属属性'] = is_new.map({True: '新开', False: '历史'})
@@ -50,13 +53,18 @@ def main():
     new_count = is_new.sum()
     print(f"新开: {new_count} 个, 历史: {len(df) - new_count} 个")
 
-    # 预算使用率已经是百分比格式，直接使用原始数据
+    # 预算使用率 = 预算使用 ÷ 核定总额
+    df['预算使用率'] = df.apply(
+        lambda row: round(row['预算使用'] / row['核定总额'], 4)
+        if pd.notna(row.get('预算使用')) and pd.notna(row.get('核定总额')) and row['核定总额'] > 0
+        else 0,
+        axis=1
+    )
+
     # 确保输出时带有百分号
     if df['预算使用率'].dtype == 'float64':
-        # 如果是小数形式，转换为百分比格式（乘以100再加%）
         df['预算使用率'] = df['预算使用率'].apply(lambda x: f"{round(x * 100, 2)}%" if pd.notna(x) else "0%")
     else:
-        # 如果已经是字符串形式，确保有百分号
         df['预算使用率'] = df['预算使用率'].apply(
             lambda x: str(x) if pd.notna(x) and str(x).endswith('%') else (f"{x}%" if pd.notna(x) else "0%")
         )
@@ -64,10 +72,11 @@ def main():
     # 计算收入成本比 = 实际运营收益 ÷ 已使用预算
     # 实际运营收益 = REVENUE_COL列, 已使用预算 = 预算使用列
     # 列为空时按0计算
-    print(f"收益列名: {REVENUE_COL}")
-    df[REVENUE_COL] = df[REVENUE_COL].fillna(0)
+    revenue_col = REVENUE_COL if REVENUE_COL in df.columns else YEAR_REVENUE_COL
+    print(f"收益列名: {revenue_col}")
+    df[revenue_col] = df[revenue_col].fillna(0)
     df['收入成本比'] = df.apply(
-        lambda row: round(row[REVENUE_COL] / row['预算使用'], 2) if row['预算使用'] > 0 else 0,
+        lambda row: round(row[revenue_col] / row['预算使用'], 2) if row['预算使用'] > 0 else 0,
         axis=1
     )
 
@@ -80,7 +89,7 @@ def main():
         budget_rate_str = row['预算使用率']
         budget_rate = float(budget_rate_str.replace('%', ''))
         cost_ratio = row['收入成本比']
-        revenue_1_4 = row[REVENUE_COL] if pd.notna(row[REVENUE_COL]) else 0
+        revenue_1_4 = row[revenue_col] if pd.notna(row[revenue_col]) else 0
         revenue_25 = row[YEAR_REVENUE_COL] if pd.notna(row[YEAR_REVENUE_COL]) else 0
 
         # 绿色（良性运营）：收入成本比≥1.72
@@ -118,24 +127,55 @@ def main():
         print(f"  {color}: {count} 个")
     print(f"  不符合条件: {len(df[df['颜色分类'] == ''])} 个")
 
-    # 输出到Excel，每个颜色一个sheet
-    with pd.ExcelWriter(OUTPUT_FILE, engine='openpyxl') as writer:
-        # 总表
-        df.to_excel(writer, index=False, sheet_name='合同汇总')
+    # 用openpyxl原地更新，保留底纹等格式
+    wb = openpyxl.load_workbook(output_file)
+    ws = wb['合同汇总'] if '合同汇总' in wb.sheetnames else wb.active
 
-        # 各颜色分类sheet
-        for color in ['红色', '橙色', '黄色', '绿色']:
-            color_df = df[df['颜色分类'] == color]
-            if not color_df.empty:
-                color_df.to_excel(writer, index=False, sheet_name=f'{color}专区')
+    # 找到已有列
+    headers = {ws.cell(row=1, column=c).value: c for c in range(1, ws.max_column + 1)}
 
-    print(f"\n导出完成: {OUTPUT_FILE}")
+    # 需要新增的列
+    new_cols = ['专属属性', '预算使用率', '收入成本比', '颜色分类']
+    for col_name in new_cols:
+        if col_name not in headers:
+            next_col = ws.max_column + 1
+            ws.cell(row=1, column=next_col, value=col_name)
+            headers[col_name] = next_col
+
+    # 写入数据
+    for row_idx in range(2, ws.max_row + 1):
+        for col_name in new_cols:
+            col_idx = headers[col_name]
+            val = df.iloc[row_idx - 2][col_name]
+            ws.cell(row=row_idx, column=col_idx, value=str(val) if pd.notna(val) else '')
+
+    # 各颜色分类sheet
+    for color in ['红色', '橙色', '黄色', '绿色']:
+        color_df = df[df['颜色分类'] == color]
+        if color_df.empty:
+            continue
+        sheet_name = f'{color}专区'
+        if sheet_name in wb.sheetnames:
+            del wb[sheet_name]
+        ws_color = wb.create_sheet(sheet_name)
+        # 写表头
+        for c, col_name in enumerate(df.columns, 1):
+            ws_color.cell(row=1, column=c, value=col_name)
+        # 写数据
+        for r, (_, row) in enumerate(color_df.iterrows(), 2):
+            for c, col_name in enumerate(df.columns, 1):
+                val = row[col_name]
+                ws_color.cell(row=r, column=c, value=str(val) if pd.notna(val) else '')
+
+    wb.save(output_file)
+
+    print(f"\n导出完成: {output_file}")
     print(f"包含sheet: 合同汇总, 红色专区, 橙色专区, 黄色专区, 绿色专区")
 
     # 计算统计数据并保存到JSON
     stats = {
         "预算使用总额": float(round(df['预算使用'].sum(), 2)),
-        "实际运营收益": float(round(df[REVENUE_COL].sum(), 2)),
+        "实际运营收益": float(round(df[revenue_col].sum(), 2)),
         "有成本投入专区总数": int(df['预算使用'].count()),
         "红色专区个数": int(color_counts.get('红色', 0)),
         "橙色专区个数": int(color_counts.get('橙色', 0)),
@@ -143,7 +183,7 @@ def main():
         "绿色专区个数": int(color_counts.get('绿色', 0))
     }
 
-    json_file = f'中间数据/统计数据{start_str}-{end_str}.json'
+    json_file = f'中间数据/统计数据{start_str}-{end_str}{suffix}.json'
     with open(json_file, 'w', encoding='utf-8') as f:
         json.dump(stats, f, ensure_ascii=False, indent=2)
 
