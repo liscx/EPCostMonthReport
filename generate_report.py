@@ -18,26 +18,28 @@ end_date = config['date_range']['end_date']
 start_str = start_date.replace('-', '')
 end_str = end_date.replace('-', '')
 
-# 文件路径
-EXCEL_FILE = f'中间数据/合同汇总{start_str}-{end_str}_fixx.xlsx'
-JSON_FILE = f'中间数据/统计数据{start_str}-{end_str}.json'
-TEMPLATE_FILE = 'Model/SaaSReportModel.docx'
-OUTPUT_FILE = f'结果数据/SaaS月报{start_str}-{end_str}.docx'
-
 
 def main():
+    # 文件路径：支持 workflow 时间戳
+    ts = os.environ.get('WORKFLOW_TIMESTAMP', '')
+    suffix = f'_{ts}' if ts else ''
+    excel_file = f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx'
+    json_file = f'中间数据/统计数据{start_str}-{end_str}{suffix}.json'
+    template_file = 'Model/SaaSReportModel.docx'
+    output_file = f'结果数据/SaaS月报{start_str}-{end_str}{suffix}.docx'
+
     # 确保输出目录存在
     os.makedirs('结果数据', exist_ok=True)
 
     # 读取JSON统计数据
-    with open(JSON_FILE, 'r', encoding='utf-8') as f:
+    with open(json_file, 'r', encoding='utf-8') as f:
         stats = json.load(f)
 
     # 读取Excel数据
-    df = pd.read_excel(EXCEL_FILE)
+    df = pd.read_excel(excel_file)
 
     # 加载Word模板
-    doc = Document(TEMPLATE_FILE)
+    doc = Document(template_file)
 
     # 替换段落中的占位符
     placeholder_map = {
@@ -90,8 +92,8 @@ def main():
             row_cells[8].text = str(row.get('收入成本比', ''))  # 收入成本比
             row_cells[9].text = str(row.get('专属属性', ''))  # 专区属性
 
-    doc.save(OUTPUT_FILE)
-    print(f"Word报告已生成: {OUTPUT_FILE}")
+    doc.save(output_file)
+    print(f"Word报告已生成: {output_file}")
 
     # 输出统计信息
     print(f"\n填充的占位符:")

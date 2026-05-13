@@ -6,6 +6,7 @@ import yaml
 import warnings
 import openpyxl
 import subprocess
+import signal
 
 sys.stdout.reconfigure(encoding='utf-8')
 from datetime import date, timedelta
@@ -19,6 +20,23 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 import pandas as pd
+
+# 全局driver引用，用于信号处理时优雅关闭
+_active_driver = None
+
+def _graceful_shutdown(signum, frame):
+    """收到终止信号时优雅关闭Chrome，确保cookie写入磁盘"""
+    global _active_driver
+    print(f"\n收到终止信号，正在关闭浏览器...")
+    if _active_driver:
+        try:
+            _active_driver.quit()
+        except Exception:
+            pass
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, _graceful_shutdown)
+signal.signal(signal.SIGTERM, _graceful_shutdown)
 
 
 def load_config():
@@ -40,13 +58,12 @@ def load_projects():
 
 
 def _kill_chrome_processes():
-    """清理残留的 Chrome 和 chromedriver 进程"""
-    for proc_name in ['chromedriver.exe', 'chrome.exe']:
-        try:
-            subprocess.run(['taskkill', '/F', '/IM', proc_name],
-                          capture_output=True, timeout=10)
-        except Exception:
-            pass
+    """只清理残留的 chromedriver 进程，不杀用户的 Chrome（避免丢失cookie）"""
+    try:
+        subprocess.run(['taskkill', '/F', '/IM', 'chromedriver.exe'],
+                      capture_output=True, timeout=10)
+    except Exception:
+        pass
 
 
 def create_chrome_driver(download_dir):
@@ -54,7 +71,9 @@ def create_chrome_driver(download_dir):
 
     # 设置 chromedriver 下载镜像（国内加速）
     os.environ['SE_MANAGER_DRIVER_MIRROR_URL'] = 'https://registry.npmmirror.com/-/binary/chrome-for-testing'
-
+    # ++++ 在这里增加这行代码 ++++
+    # 强制 Selenium Manager 离线运行，跳过网络版本的校验请求，直接秒开本地已有的驱动！
+    os.environ['SE_OFFLINE'] = 'true'
     # 清理残留进程
     print("  清理残留 Chrome 进程...")
     _kill_chrome_processes()
@@ -66,13 +85,20 @@ def create_chrome_driver(download_dir):
     options.add_argument('--start-maximized')
     options.add_argument('--disable-blink-features=AutomationControlled')
 
+    # 隐藏"正受到自动测试软件的控制"提示，防止部分OA系统检测到Selenium而主动退登
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+
     user_data_dir = os.path.join(os.getcwd(), "chrome_user_data")
     options.add_argument(f'--user-data-dir={user_data_dir}')
 
     prefs = {
         "download.default_directory": download_dir,
         "download.prompt_for_download": False,
-        "download.directory_upgrade": True
+        "download.directory_upgrade": True,
+        # 欺骗Chrome使其认为上次是正常退出，并恢复上次的会话（即保留Session Cookies）
+        "profile.exit_type": "Normal",
+        "session.restore_on_startup": 1
     }
     options.add_experimental_option("prefs", prefs)
 
@@ -454,6 +480,8 @@ def main():
     print(f"汇总文件: {master_file}")
 
     driver = create_chrome_driver(download_dir)
+    global _active_driver
+    _active_driver = driver
     wait = WebDriverWait(driver, 15)
 
     try:
@@ -771,9 +799,11 @@ def main():
     except Exception as e:
         print(f"发生错误: {e}")
     finally:
-        print("\n所有项目处理完成，10秒后关闭浏览器...")
-        time.sleep(10)
+        print("\n所有项目处理完成，关闭浏览器...")
+        time.sleep(3)
         driver.quit()
+        _active_driver = None
+        time.sleep(2)  # 等待Chrome将cookie等数据写入磁盘
 
         # 输出导出报告
         print("\n" + "=" * 60)
