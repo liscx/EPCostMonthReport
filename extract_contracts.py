@@ -30,7 +30,6 @@ end_str = end_date.replace('-', '')
 SOURCE_FILE = f'源数据/export/ejyExport{start_str}-{end_str}.xlsx'
 REF_FILE = '源数据/合同汇总表.xlsx'
 REF_FILE_OLD = '源数据/新点电子交易专区&项目跟进表.xlsx'
-OUTPUT_FILE = f'中间数据/合同汇总{start_str}-{end_str}--0512.xlsx'
 
 # 按列索引定位 ejyExport.xlsx
 COL_CONTRACT = 20   # 合同编号
@@ -270,6 +269,11 @@ def match_unmatched_ejy(cost_dict, matched_in_summary, summary_df):
 
 
 def main():
+    # 文件路径：支持 workflow 时间戳
+    ts = os.environ.get('WORKFLOW_TIMESTAMP', '')
+    suffix = f'_{ts}' if ts else ''
+    output_file = f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx'
+
     # 加载 ejyExport 数据（主数据源）
     cost_dict = load_contracts_from_ejy()
     if cost_dict is None:
@@ -300,7 +304,7 @@ def main():
     print(f"  ejyExport 未匹配（黄色）: {len(yellow_rows)} 行")
 
     # 写入Excel并添加底纹
-    with pd.ExcelWriter(OUTPUT_FILE, engine='openpyxl') as writer:
+    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         result.to_excel(writer, index=False, sheet_name='合同汇总')
 
         workbook = writer.book
@@ -322,7 +326,7 @@ def main():
             for col_idx in range(1, len(result.columns) + 1):
                 worksheet.cell(row=row_idx, column=col_idx).fill = yellow_fill
 
-    print(f"\n导出完成: {OUTPUT_FILE}")
+    print(f"\n导出完成: {output_file}")
     print(f"总行数: {len(result)}")
 
 
