@@ -4,6 +4,7 @@ import warnings
 import yaml
 import os
 import re
+from datetime import datetime
 from openpyxl.styles import PatternFill
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -12,6 +13,14 @@ warnings.filterwarnings('ignore', message='Workbook contains no default style')
 # 读取配置生成文件名
 with open('config.yaml', 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
+
+# 数据年份：优先使用yaml配置，否则根据当前年份自动生成
+_config_year = config.get('dataYear', '')
+if _config_year:
+    DATA_YEAR_SHORT = _config_year
+else:
+    DATA_YEAR_SHORT = str(datetime.now().year)[2:]
+YEAR_REVENUE_COL = f'{DATA_YEAR_SHORT}年收益'
 
 start_date = config['date_range']['start_date']
 end_date = config['date_range']['end_date']
@@ -146,7 +155,7 @@ def match_contracts(cost_dict, summary_df):
                 '商务': str(row['商务']) if pd.notna(row.get('商务', '')) else '',
                 '专区码': '',
                 '核定总额': row.get('核定总额', ''),
-                '25年收益': row.get('25年收益', ''),
+                YEAR_REVENUE_COL: row.get(YEAR_REVENUE_COL, ''),
                 '核定总额计算规则': str(row.get('核定总额计算规则', '')) if pd.notna(row.get('核定总额计算规则', '')) else '',
             })
             continue
@@ -184,7 +193,7 @@ def match_contracts(cost_dict, summary_df):
                 '商务': str(row['商务']) if pd.notna(row.get('商务', '')) else '',
                 '专区码': zone_code,
                 '核定总额': row.get('核定总额', ''),
-                '25年收益': row.get('25年收益', ''),
+                YEAR_REVENUE_COL: row.get(YEAR_REVENUE_COL, ''),
                 '核定总额计算规则': str(row.get('核定总额计算规则', '')) if pd.notna(row.get('核定总额计算规则', '')) else '',
             })
         else:
@@ -198,7 +207,7 @@ def match_contracts(cost_dict, summary_df):
                 '商务': str(row['商务']) if pd.notna(row.get('商务', '')) else '',
                 '专区码': zone_code,
                 '核定总额': row.get('核定总额', ''),
-                '25年收益': row.get('25年收益', ''),
+                YEAR_REVENUE_COL: row.get(YEAR_REVENUE_COL, ''),
                 '核定总额计算规则': str(row.get('核定总额计算规则', '')) if pd.notna(row.get('核定总额计算规则', '')) else '',
             })
 
@@ -252,7 +261,7 @@ def match_unmatched_ejy(cost_dict, matched_in_summary, summary_df):
             '商务': info.get('商务', ''),
             '专区码': info.get('专区码', ''),
             '核定总额': '',
-            '25年收益': '',
+            YEAR_REVENUE_COL: '',
             '核定总额计算规则': '',
         })
 

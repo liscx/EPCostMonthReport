@@ -4,13 +4,31 @@ import warnings
 import yaml
 import os
 import json
-# 2025年数据匹配
+from datetime import datetime
+# 数据匹配
 sys.stdout.reconfigure(encoding='utf-8')
 warnings.filterwarnings('ignore', message='Workbook contains no default style')
 
 # 读取配置
 with open('config.yaml', 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
+
+# 收益列名：优先使用yaml配置，否则根据当前月份自动生成
+_config_range = config.get('dataRange', '')
+if _config_range:
+    REVENUE_COL = _config_range
+else:
+    _current_month = datetime.now().month
+    REVENUE_COL = f'1-{_current_month - 1}月收益'
+
+# 数据年份：优先使用yaml配置，否则根据当前年份自动生成
+_config_year = config.get('dataYear', '')
+if _config_year:
+    DATA_YEAR = _config_year
+else:
+    DATA_YEAR = str(datetime.now().year)[2:]
+YEAR_REVENUE_COL = f'{DATA_YEAR}年收益'
+CURRENT_CONTRACT_PREFIX = f'C{int(DATA_YEAR) + 1}'
 
 start_date = config['date_range']['start_date']
 end_date = config['date_range']['end_date']
@@ -26,7 +44,7 @@ def main():
     df = pd.read_excel(INPUT_FILE)
     print(f"读取: {INPUT_FILE}, 共 {len(df)} 条记录")
 
-    is_new = df['合同编号'].astype(str).str.startswith('C2026')
+    is_new = df['合同编号'].astype(str).str.startswith(CURRENT_CONTRACT_PREFIX)
     df['专属属性'] = is_new.map({True: '新开', False: '历史'})
 
     new_count = is_new.sum()
@@ -44,11 +62,12 @@ def main():
         )
 
     # 计算收入成本比 = 实际运营收益 ÷ 已使用预算
-    # 实际运营收益 = 1-4月收益列（J列）, 已使用预算 = 预算使用列
-    # J列为空时按0计算
-    df['1-4月收益'] = df['1-4月收益'].fillna(0)
+    # 实际运营收益 = REVENUE_COL列, 已使用预算 = 预算使用列
+    # 列为空时按0计算
+    print(f"收益列名: {REVENUE_COL}")
+    df[REVENUE_COL] = df[REVENUE_COL].fillna(0)
     df['收入成本比'] = df.apply(
-        lambda row: round(row['1-4月收益'] / row['预算使用'], 2) if row['预算使用'] > 0 else 0,
+        lambda row: round(row[REVENUE_COL] / row['预算使用'], 2) if row['预算使用'] > 0 else 0,
         axis=1
     )
 
@@ -61,8 +80,8 @@ def main():
         budget_rate_str = row['预算使用率']
         budget_rate = float(budget_rate_str.replace('%', ''))
         cost_ratio = row['收入成本比']
-        revenue_1_4 = row['1-4月收益'] if pd.notna(row['1-4月收益']) else 0
-        revenue_25 = row['25年收益'] if pd.notna(row['25年收益']) else 0
+        revenue_1_4 = row[REVENUE_COL] if pd.notna(row[REVENUE_COL]) else 0
+        revenue_25 = row[YEAR_REVENUE_COL] if pd.notna(row[YEAR_REVENUE_COL]) else 0
 
         # 绿色（良性运营）：收入成本比≥1.72
         if cost_ratio >= 1.72:
@@ -116,7 +135,7 @@ def main():
     # 计算统计数据并保存到JSON
     stats = {
         "预算使用总额": float(round(df['预算使用'].sum(), 2)),
-        "实际运营收益": float(round(df['1-4月收益'].sum(), 2)),
+        "实际运营收益": float(round(df[REVENUE_COL].sum(), 2)),
         "有成本投入专区总数": int(df['预算使用'].count()),
         "红色专区个数": int(color_counts.get('红色', 0)),
         "橙色专区个数": int(color_counts.get('橙色', 0)),

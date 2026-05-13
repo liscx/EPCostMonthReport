@@ -2,6 +2,12 @@ date_range:
   start_date: "2026-01-01"
   end_date: "2026-04-30"
 
+# 收益列名，如 "1-4月收益"。留空则根据当前月份自动生成（当前月-1）
+dataRange: ""
+
+# 数据年份简称，如 "25"。留空则根据当前年份自动生成（如2026→"26"）
+dataYear: ""
+
 split_export:
   segment_months: 2
   projects:

@@ -2,12 +2,23 @@ import pandas as pd
 import sys
 import yaml
 import os
+from datetime import datetime
 
 sys.stdout.reconfigure(encoding='utf-8')
 
 # 读取配置
 with open('config.yaml', 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
+
+# 数据年份：优先使用yaml配置，否则根据当前年份自动生成
+_config_year = config.get('dataYear', '')
+if _config_year:
+    DATA_YEAR_SHORT = _config_year
+else:
+    DATA_YEAR_SHORT = str(datetime.now().year)[2:]
+DATA_YEAR = int(f'20{DATA_YEAR_SHORT}')
+NEXT_YEAR = DATA_YEAR + 1
+YEAR_REVENUE_COL = f'{DATA_YEAR_SHORT}年收益'
 
 start_date = config['date_range']['start_date']
 end_date = config['date_range']['end_date']
@@ -20,47 +31,47 @@ df = pd.read_excel(input_file)
 
 def calc_quota(row):
     contract_id = str(row['合同编号'])
-    revenue = row['25年收益']
+    revenue = row[YEAR_REVENUE_COL]
 
     year = int(contract_id[1:5])
 
-    # 1. 2026年：新开专区，固定50000
-    if year == 2026:
-        return 50000, '2026年新开专区，核定总额=50000'
+    # 1. 当前年+1：新开专区，固定50000
+    if year == NEXT_YEAR:
+        return 50000, f'{NEXT_YEAR}年新开专区，核定总额=50000'
 
-    # 2. 2025年10月之后，收益为空或为0，按50000算
-    if year == 2025:
+    # 2. 当前年10月之后，收益为空或为0，按50000算
+    if year == DATA_YEAR:
         month = int(contract_id[5:7])
         if month >= 10 and (pd.isna(revenue) or revenue == 0):
-            return 50000, f'2025年{month}月开设，收益为空或0，新开专区，核定总额=50000'
+            return 50000, f'{DATA_YEAR}年{month}月开设，收益为空或0，新开专区，核定总额=50000'
 
-    # 3. 2025年10月之前收益为空或为0，保底32000
-    if year == 2025 and month < 10 and (pd.isna(revenue) or revenue == 0):
-        return 32000, f'2025年{month}月开设，收益为空或0，保底32000'
+    # 3. 当前年10月之前收益为空或为0，保底32000
+    if year == DATA_YEAR and month < 10 and (pd.isna(revenue) or revenue == 0):
+        return 32000, f'{DATA_YEAR}年{month}月开设，收益为空或0，保底32000'
 
-    # 4. 收益为空或为0（2025年之前），保底32000
+    # 4. 收益为空或为0（当前年之前），保底32000
     if pd.isna(revenue) or revenue == 0:
         return 32000, '收益为空或0，保底32000'
 
-    # 5. 2025年合同（10月之前，收益不为0）：年化收益×0.3，最低32000
-    if year == 2025:
+    # 5. 当前年合同（10月之前，收益不为0）：年化收益×0.3，最低32000
+    if year == DATA_YEAR:
         months = 12 - month
         if months <= 0:
             quota = revenue * 0.3
-            return max(quota, 32000), f'2025年{month}月开设，收益×0.3={quota:.0f}'
+            return max(quota, 32000), f'{DATA_YEAR}年{month}月开设，收益×0.3={quota:.0f}'
         annual_revenue = revenue / months * 12
         quota = annual_revenue * 0.3
         if quota >= 32000:
-            return quota, f'2025年{month}月开设，{months}个月收益，年化={annual_revenue:.0f}，×0.3={quota:.0f}'
+            return quota, f'{DATA_YEAR}年{month}月开设，{months}个月收益，年化={annual_revenue:.0f}，×0.3={quota:.0f}'
         else:
-            return 32000, f'2025年{month}月开设，{months}个月收益，年化={annual_revenue:.0f}，×0.3={quota:.0f}<32000，保底32000'
+            return 32000, f'{DATA_YEAR}年{month}月开设，{months}个月收益，年化={annual_revenue:.0f}，×0.3={quota:.0f}<32000，保底32000'
 
-    # 6. 2025年之前合同：收益×0.3，最低32000
+    # 6. 当前年之前合同：收益×0.3，最低32000
     quota = revenue * 0.3
     if quota >= 32000:
-        return quota, f'2025年前合同，收益×0.3={quota:.0f}'
+        return quota, f'{DATA_YEAR}年前合同，收益×0.3={quota:.0f}'
     else:
-        return 32000, f'2025年前合同，收益×0.3={quota:.0f}<32000，保底32000'
+        return 32000, f'{DATA_YEAR}年前合同，收益×0.3={quota:.0f}<32000，保底32000'
 
 
 
@@ -82,7 +93,7 @@ print(f'\n统计信息:')
 print(f'总记录数: {len(df)}')
 print(f'已有核定总额（跳过）: {existing_count}条')
 print(f'本次计算核定总额: {mask.sum()}条')
-print(f'核定总额为50000的(2026年新开): {len(df[df["核定总额"] == 50000])}条')
+print(f'核定总额为50000的({NEXT_YEAR}年新开): {len(df[df["核定总额"] == 50000])}条')
 print(f'核定总额为32000的(保底): {len(df[df["核定总额"] == 32000])}条')
 print(f'其他核定总额: {len(df[(df["核定总额"] != 32000) & (df["核定总额"] != 50000)])}条')
 
