@@ -7,10 +7,14 @@ import warnings
 import openpyxl
 import subprocess
 import signal
+from feishu_notify import send_image as feishu_send_image
 
 sys.stdout.reconfigure(encoding='utf-8')
 from datetime import date, timedelta
 import calendar
+
+# 从环境变量读取目标 chat_id（agent 传入）
+GROUP_CHAT_ID = os.environ.get("FEISHU_NOTIFY_CHAT_ID", "")
 
 warnings.filterwarnings('ignore', message='Workbook contains no default style')
 from selenium import webdriver
@@ -66,45 +70,135 @@ def _kill_chrome_processes():
         pass
 
 
+def _get_chrome_version():
+    """从注册表获取本机 Chrome 版本号"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['reg', 'query',
+             r'HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Google Chrome',
+             '/v', 'version'],
+            capture_output=True, text=True, encoding='gbk', timeout=10
+        )
+        for line in result.stdout.splitlines():
+            if 'version' in line.lower() and 'REG_SZ' in line:
+                return line.split('REG_SZ')[-1].strip()
+    except Exception:
+        pass
+    # 备用：直接从 chrome.exe 获取
+    for chrome_path in [
+        r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+        r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+    ]:
+        if os.path.exists(chrome_path):
+            try:
+                result = subprocess.run([chrome_path, '--version'], capture_output=True, text=True, timeout=10)
+                # 输出格式: "Google Chrome 148.0.7778.168"
+                for word in result.stdout.split():
+                    if word[0].isdigit():
+                        return word.strip()
+            except Exception:
+                pass
+    return None
+
+
+def _get_or_download_chromedriver(chrome_version):
+    """获取匹配的 chromedriver，本地没有则从镜像下载"""
+    from selenium.webdriver.chrome.service import Service
+    import zipfile
+
+    # Chrome 主版本号（如 148）
+    major = chrome_version.split('.')[0]
+    # 缓存目录
+    cache_base = os.path.join(os.environ.get('LOCALAPPDATA', ''), '.cache', 'selenium', 'chromedriver', 'win64')
+    driver_dir = os.path.join(cache_base, chrome_version, 'chromedriver-win64')
+    driver_path = os.path.join(driver_dir, 'chromedriver.exe')
+
+    # 1. 精确版本已缓存
+    if os.path.exists(driver_path):
+        print(f"  使用缓存的 chromedriver: {chrome_version}")
+        return Service(executable_path=driver_path)
+
+    # 2. 查找同主版本号的已缓存版本
+    if os.path.exists(cache_base):
+        for cached_ver in os.listdir(cache_base):
+            if cached_ver.startswith(major + '.'):
+                cached_path = os.path.join(cache_base, cached_ver, 'chromedriver-win64', 'chromedriver.exe')
+                if os.path.exists(cached_path):
+                    print(f"  使用同主版本缓存: {cached_ver}")
+                    return Service(executable_path=cached_path)
+
+    # 3. 从镜像下载
+    mirror = 'https://registry.npmmirror.com/-/binary/chrome-for-testing'
+    print(f"  正在从镜像下载 chromedriver {chrome_version} ...")
+    os.makedirs(driver_dir, exist_ok=True)
+    zip_url = f"{mirror}/{chrome_version}/win64/chromedriver-win64.zip"
+    zip_path = os.path.join(cache_base, chrome_version, 'chromedriver-win64.zip')
+
+    try:
+        import urllib.request
+        urllib.request.urlretrieve(zip_url, zip_path)
+    except Exception:
+        # 镜像可能没有精确版本，尝试 Google 官方
+        print(f"  镜像未找到，尝试 Google 官方源...")
+        google_url = f"https://storage.googleapis.com/chrome-for-testing-public/{chrome_version}/win64/chromedriver-win64.zip"
+        urllib.request.urlretrieve(google_url, zip_path)
+
+    # 解压
+    with zipfile.ZipFile(zip_path, 'r') as zf:
+        zf.extractall(os.path.join(cache_base, chrome_version))
+
+    if os.path.exists(driver_path):
+        print(f"  chromedriver {chrome_version} 下载完成")
+        return Service(executable_path=driver_path)
+
+    raise RuntimeError(f"无法获取 chromedriver {chrome_version}，请手动下载")
+
+
 def create_chrome_driver(download_dir):
     print("正在初始化 Chrome WebDriver...")
 
-    # 设置 chromedriver 下载镜像（国内加速）
-    os.environ['SE_MANAGER_DRIVER_MIRROR_URL'] = 'https://registry.npmmirror.com/-/binary/chrome-for-testing'
-    # ++++ 在这里增加这行代码 ++++
-    # 强制 Selenium Manager 离线运行，跳过网络版本的校验请求，直接秒开本地已有的驱动！
-    os.environ['SE_OFFLINE'] = 'true'
     # 清理残留进程
     print("  清理残留 Chrome 进程...")
     _kill_chrome_processes()
     time.sleep(2)
+
+    # 自动检测 Chrome 版本并获取匹配的 chromedriver
+    chrome_version = _get_chrome_version()
+    if not chrome_version:
+        raise RuntimeError("未检测到 Chrome 浏览器，请先安装 Google Chrome")
+    print(f"  检测到 Chrome 版本: {chrome_version}")
+    service = _get_or_download_chromedriver(chrome_version)
 
     options = Options()
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--start-maximized')
     options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_argument('--no-first-run')
+    options.add_argument('--no-default-browser-check')
+    options.add_argument('--disable-extensions')
 
     # 隐藏"正受到自动测试软件的控制"提示，防止部分OA系统检测到Selenium而主动退登
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
 
-    user_data_dir = os.path.join(os.getcwd(), "chrome_user_data")
+    # 每次使用临时目录，不缓存用户数据
+    import tempfile
+    user_data_dir = tempfile.mkdtemp(prefix="chrome_selenium_")
     options.add_argument(f'--user-data-dir={user_data_dir}')
 
     prefs = {
         "download.default_directory": download_dir,
         "download.prompt_for_download": False,
         "download.directory_upgrade": True,
-        # 欺骗Chrome使其认为上次是正常退出，并恢复上次的会话（即保留Session Cookies）
         "profile.exit_type": "Normal",
         "session.restore_on_startup": 1
     }
     options.add_experimental_option("prefs", prefs)
 
-    # Selenium Manager 自动下载并缓存 chromedriver（首次运行会下载，之后用缓存）
     print("  启动 Chrome 浏览器...")
-    driver = webdriver.Chrome(options=options)
+    driver = webdriver.Chrome(service=service, options=options)
     print("  Chrome WebDriver 初始化完成")
     return driver
 
@@ -327,6 +421,7 @@ def export_by_url(driver, project_name, url, start_date, end_date, download_dir,
         # 访问URL
         driver.get(url)
         time.sleep(5)
+        driver.execute_script("document.body.style.zoom = '0.75'")
         wait_mask_disappear(driver, 30)
 
         # 切换到任务列表 iframe
@@ -457,7 +552,7 @@ def main():
     # 根据日期范围自动生成文件名
     start_str = start_date.replace('-', '')
     end_str = end_date.replace('-', '')
-    master_file = f'源数据/export/ejyExport{start_str}-{end_str}.xlsx'
+    master_file = f'源数据/export/projExport{start_str}-{end_str}.xlsx'
     os.makedirs('源数据/export', exist_ok=True)
     if os.path.exists(master_file):
         os.remove(master_file)
@@ -490,19 +585,63 @@ def main():
         driver.get(url)
         print("页面加载完成")
 
-        user_data_dir = os.path.join(os.getcwd(), "chrome_user_data")
-        if os.path.exists(user_data_dir):
-            print("检测到已保存的登录态，等待页面加载...")
-            time.sleep(5)
-        else:
-            print("首次运行，请扫码登录...")
-            print("登录态将自动保存，下次无需重新登录")
+        # 等待页面加载
+        time.sleep(5)
 
+        # 设置页面缩放为75%
+        driver.execute_script("document.body.style.zoom = '0.75'")
+        time.sleep(1)
+
+        # 每次都是全新浏览器，直接点击 #code 生成二维码
+        qr_screenshot_path = os.path.join(os.getcwd(), "qr_code.png")
+        print("点击 #code 生成二维码...")
+        try:
+            driver.switch_to.default_content()
+            code_elem = WebDriverWait(driver, 15).until(
+                EC.element_to_be_clickable((By.ID, 'code'))
+            )
+            try:
+                code_elem.click()
+            except Exception:
+                driver.execute_script("arguments[0].click();", code_elem)
+            print("已点击 #code，等待二维码加载...")
+            time.sleep(3)
+            driver.save_screenshot(qr_screenshot_path)
+            print(f"QR_SCREENSHOT:{qr_screenshot_path}")
+            feishu_send_image(qr_screenshot_path, "OA 登录二维码已生成，请扫码登录：", GROUP_CHAT_ID)
+        except Exception as e:
+            print(f"点击 #code 失败: {e}，尝试直接截图...")
+            driver.save_screenshot(qr_screenshot_path)
+            print(f"QR_SCREENSHOT:{qr_screenshot_path}")
+            feishu_send_image(qr_screenshot_path, "OA 登录二维码已生成，请扫码登录：", GROUP_CHAT_ID)
+
+        print("请扫描二维码登录，等待中...")
+
+        # 等待登录完成（最多5分钟）
+        for _ in range(300):
+            time.sleep(1)
+            try:
+                driver.switch_to.default_content()
+                current_url = driver.current_url
+                if 'login' not in current_url.lower() and 'sso' not in current_url.lower() and 'cas' not in current_url.lower():
+                    print("检测到页面跳转，登录可能成功...")
+                    break
+                if driver.find_elements(By.CSS_SELECTOR, 'li[data-id="00050007"]'):
+                    break
+            except Exception:
+                pass
+
+        # 最终确认登录状态
         print("等待登录完成...")
-        WebDriverWait(driver, 120).until(
+        WebDriverWait(driver, 60).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, 'li[data-id="00050007"]'))
         )
         print("登录成功！")
+
+        # 登录后页面跳转，重新设置缩放
+        time.sleep(2)
+        driver.execute_script("document.body.style.zoom = '0.75'")
+        time.sleep(1)
 
         # 第一步：先处理无URL的项目（使用搜索方式）
         if projects_without_url:
@@ -511,7 +650,27 @@ def main():
             print(f"{'='*60}")
 
             print("点击项目集菜单...")
-            wait_and_click(driver, By.CSS_SELECTOR, 'li[data-id="00050007"]')
+            # 先检查是否有菜单触发按钮（页面缩放后可能需要先展开菜单）
+            try:
+                trigger = driver.find_elements(By.CSS_SELECTOR, 'span.top-menu-trigger')
+                if trigger:
+                    print("  发现菜单触发按钮，先点击展开...")
+                    driver.execute_script("arguments[0].click();", trigger[0])
+                    time.sleep(1)
+            except Exception:
+                pass
+            try:
+                wait_and_click(driver, By.CSS_SELECTOR, 'li[data-id="00050007"]')
+            except Exception:
+                print("  项目集点击失败，尝试先点击触发按钮...")
+                try:
+                    trigger = driver.find_elements(By.CSS_SELECTOR, 'span.top-menu-trigger')
+                    if trigger:
+                        driver.execute_script("arguments[0].click();", trigger[0])
+                        time.sleep(2)
+                    wait_and_click(driver, By.CSS_SELECTOR, 'li[data-id="00050007"]')
+                except Exception as e:
+                    print(f"  项目集菜单点击最终失败: {e}")
             print("项目集菜单点击完成，等待页面加载...")
             time.sleep(5)
 

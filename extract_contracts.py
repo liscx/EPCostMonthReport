@@ -27,18 +27,18 @@ end_date = config['date_range']['end_date']
 start_str = start_date.replace('-', '')
 end_str = end_date.replace('-', '')
 
-SOURCE_FILE = f'源数据/export/ejyExport{start_str}-{end_str}.xlsx'
+SOURCE_FILE = f'源数据/export/projExport{start_str}-{end_str}.xlsx'
 REF_FILE = '源数据/合同汇总表.xlsx'
 REF_FILE_OLD = '源数据/新点电子交易专区&项目跟进表.xlsx'
 
-# 按列索引定位 ejyExport.xlsx
+# 按列索引定位 projExport.xlsx
 COL_CONTRACT = 20   # 合同编号
 COL_COST = 12       # 实际人工成本
 COL_BUDGET = 23     # 任务预算使用
 
 
 def load_contracts_from_ejy():
-    """从 ejyExport.xlsx 提取C开头的合同编号及汇总数据，返回 {合同编号: {实际人工成本, 任务预算使用}} 字典"""
+    """从 projExport.xlsx 提取C开头的合同编号及汇总数据，返回 {合同编号: {实际人工成本, 任务预算使用}} 字典"""
     xls = pd.ExcelFile(SOURCE_FILE)
     print(f"源文件: {SOURCE_FILE}, 共 {len(xls.sheet_names)} 个Sheet")
 
@@ -113,8 +113,8 @@ def parse_contract_ids(contract_id):
 
 def match_contracts(cost_dict, summary_df):
     """按照合同汇总表顺序匹配，返回 (matched, unmatched_red)
-    - matched: ejyExport和合同汇总表都能匹配到的行
-    - unmatched_red: 合同汇总表有但ejyExport没有的行（红色底纹）
+    - matched: projExport和合同汇总表都能匹配到的行
+    - unmatched_red: 合同汇总表有但projExport没有的行（红色底纹）
     """
     matched_rows = []
     unmatched_red_rows = []
@@ -144,7 +144,7 @@ def match_contracts(cost_dict, summary_df):
 
         cids = parse_contract_ids(contract_id)
         if not cids:
-            # 无法解析，作为红色（合同汇总表有，ejyExport无）
+            # 无法解析，作为红色（合同汇总表有，projExport无）
             unmatched_red_rows.append({
                 '合同编号': contract_id,
                 '实际人工成本': '',
@@ -159,7 +159,7 @@ def match_contracts(cost_dict, summary_df):
             })
             continue
 
-        # 在 ejyExport 中查找
+        # 在 projExport 中查找
         matched_cids_in_row = []
         total_budget = 0
         for cid in cids:
@@ -196,7 +196,7 @@ def match_contracts(cost_dict, summary_df):
                 '核定总额计算规则': str(row.get('核定总额计算规则', '')) if pd.notna(row.get('核定总额计算规则', '')) else '',
             })
         else:
-            # 合同汇总表有，ejyExport没有 -> 红色底纹
+            # 合同汇总表有，projExport没有 -> 红色底纹
             unmatched_red_rows.append({
                 '合同编号': contract_id,
                 '实际人工成本': '',
@@ -214,8 +214,8 @@ def match_contracts(cost_dict, summary_df):
 
 
 def match_unmatched_ejy(cost_dict, matched_in_summary, summary_df):
-    """处理 ejyExport 中未在合同汇总表匹配到的合同（黄色底纹），尝试从旧参考文件补充信息"""
-    print(f"\n处理 ejyExport 未匹配合同，参考旧文件: {REF_FILE_OLD}")
+    """处理 projExport 中未在合同汇总表匹配到的合同（黄色底纹），尝试从旧参考文件补充信息"""
+    print(f"\n处理 projExport 未匹配合同，参考旧文件: {REF_FILE_OLD}")
 
     # 从旧参考文件构建合同编号到信息的映射
     df_zone = pd.read_excel(REF_FILE_OLD, sheet_name='专区管控表', header=0, usecols=[0, 1, 2, 5, 11])
@@ -264,7 +264,7 @@ def match_unmatched_ejy(cost_dict, matched_in_summary, summary_df):
             '核定总额计算规则': '',
         })
 
-    print(f"  ejyExport 未匹配: {len(yellow_rows)} 行")
+    print(f"  projExport 未匹配: {len(yellow_rows)} 行")
     return yellow_rows
 
 
@@ -274,7 +274,7 @@ def main():
     suffix = f'_{ts}' if ts else ''
     output_file = f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx'
 
-    # 加载 ejyExport 数据（主数据源）
+    # 加载 projExport 数据（主数据源）
     cost_dict = load_contracts_from_ejy()
     if cost_dict is None:
         return
@@ -284,14 +284,14 @@ def main():
 
     # 第一步：按合同汇总表顺序匹配
     # matched_rows: 两边都能匹配到
-    # unmatched_red_rows: 合同汇总表有，ejyExport没有（红色底纹）
+    # unmatched_red_rows: 合同汇总表有，projExport没有（红色底纹）
     matched_rows, unmatched_red_rows = match_contracts(cost_dict, summary_df)
 
     print(f"\n合同汇总表匹配结果:")
     print(f"  匹配成功（绿色）: {len(matched_rows)} 行")
     print(f"  合同汇总表未匹配（红色）: {len(unmatched_red_rows)} 行")
 
-    # 第二步：处理 ejyExport 中未在合同汇总表匹配到的合同（黄色底纹）
+    # 第二步：处理 projExport 中未在合同汇总表匹配到的合同（黄色底纹）
     yellow_rows = match_unmatched_ejy(cost_dict, set(), summary_df)
 
     # 合并：先按合同汇总表顺序（匹配+红色），再追加黄色
@@ -301,7 +301,7 @@ def main():
     print(f"\n最终结果:")
     print(f"  匹配成功（绿色）: {len(matched_rows)} 行")
     print(f"  合同汇总表未匹配（红色）: {len(unmatched_red_rows)} 行")
-    print(f"  ejyExport 未匹配（黄色）: {len(yellow_rows)} 行")
+    print(f"  projExport 未匹配（黄色）: {len(yellow_rows)} 行")
 
     # 写入Excel并添加底纹
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
@@ -316,12 +316,12 @@ def main():
         matched_end = len(matched_rows)
         red_end = matched_end + len(unmatched_red_rows)
 
-        # 红色：合同汇总表有，ejyExport没有
+        # 红色：合同汇总表有，projExport没有
         for row_idx in range(matched_end + 2, red_end + 2):
             for col_idx in range(1, len(result.columns) + 1):
                 worksheet.cell(row=row_idx, column=col_idx).fill = red_fill
 
-        # 黄色：ejyExport有，合同汇总表没有
+        # 黄色：projExport有，合同汇总表没有
         for row_idx in range(red_end + 2, len(result) + 2):
             for col_idx in range(1, len(result.columns) + 1):
                 worksheet.cell(row=row_idx, column=col_idx).fill = yellow_fill

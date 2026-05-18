@@ -44,8 +44,25 @@ def main():
     input_file = f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx'
     output_file = input_file  # 原地更新
 
+    # 先用 openpyxl 读取底纹，过滤掉带底纹的行（红色/黄色=未匹配）
+    wb_check = openpyxl.load_workbook(input_file)
+    ws_check = wb_check['合同汇总'] if '合同汇总' in wb_check.sheetnames else wb_check.active
+    shaded_rows = set()  # 带底纹的行号（1-indexed）
+    for row_idx in range(2, ws_check.max_row + 1):
+        cell = ws_check.cell(row=row_idx, column=1)
+        fill = cell.fill
+        if fill and fill.fill_type == 'solid' and fill.start_color and fill.start_color.rgb:
+            rgb = str(fill.start_color.rgb)
+            # FF0000=红色, FFFF00=黄色
+            if rgb in ('FF0000', '00FF0000', 'FFFF00', '00FFFF00'):
+                shaded_rows.add(row_idx)
+    wb_check.close()
+
     df = pd.read_excel(input_file)
     print(f"读取: {input_file}, 共 {len(df)} 条记录")
+    if shaded_rows:
+        df = df.drop(index=[r - 2 for r in shaded_rows if r - 2 < len(df)]).reset_index(drop=True)
+        print(f"过滤带底纹行: {len(shaded_rows)} 行, 剩余: {len(df)} 行")
 
     is_new = df['合同编号'].astype(str).str.startswith(CURRENT_CONTRACT_PREFIX)
     df['专属属性'] = is_new.map({True: '新开', False: '历史'})
@@ -142,12 +159,16 @@ def main():
             ws.cell(row=1, column=next_col, value=col_name)
             headers[col_name] = next_col
 
-    # 写入数据
-    for row_idx in range(2, ws.max_row + 1):
+    # 写入数据（只写非底纹行）
+    # 构建 Excel 行号到 df 索引的映射
+    clean_excel_rows = [r for r in range(2, ws.max_row + 1) if r not in shaded_rows]
+    for df_idx, excel_row in enumerate(clean_excel_rows):
+        if df_idx >= len(df):
+            break
         for col_name in new_cols:
             col_idx = headers[col_name]
-            val = df.iloc[row_idx - 2][col_name]
-            ws.cell(row=row_idx, column=col_idx, value=str(val) if pd.notna(val) else '')
+            val = df.iloc[df_idx][col_name]
+            ws.cell(row=excel_row, column=col_idx, value=str(val) if pd.notna(val) else '')
 
     # 各颜色分类sheet
     for color in ['红色', '橙色', '黄色', '绿色']:

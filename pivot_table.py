@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from openpyxl import load_workbook
 
-FILE = '源数据/export/ejyExport.xlsx'
+FILE = '源数据/export/projExport.xlsx'
 OUTPUT = None  # None则覆盖原文件
 
 # 数据透视表
