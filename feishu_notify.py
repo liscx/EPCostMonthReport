@@ -22,7 +22,7 @@ _DOMAIN = "https://open.feishu.cn"
 
 
 def _get_default_chat_id() -> str:
-    """获取默认 chat_id，优先级: 参数 > 环境变量 > hermes .env FEISHU_HOME_CHANNEL"""
+    """获取默认 chat_id，优先级: 参数 > 环境变量 > hermes .env FEISHU_HOME_CHANNEL。未配置时返回空字符串。"""
     if _DEFAULT_CHAT_ID:
         return _DEFAULT_CHAT_ID
     # 尝试从 hermes .env 读取 FEISHU_HOME_CHANNEL
@@ -31,9 +31,7 @@ def _get_default_chat_id() -> str:
             for line in f:
                 if line.strip().startswith("FEISHU_HOME_CHANNEL="):
                     return line.strip().split("=", 1)[1]
-    raise RuntimeError(
-        "未配置飞书通知目标。请设置环境变量 FEISHU_NOTIFY_CHAT_ID 或 FEISHU_USER_OPEN_ID"
-    )
+    return ""
 
 
 def _load_env():
@@ -113,12 +111,15 @@ def _send_message(token: str, receive_id: str, msg_type: str, content: str, id_t
 
 
 def _resolve_target(chat_id: str) -> tuple[str, str]:
-    """解析发送目标，返回 (receive_id, id_type)"""
+    """解析发送目标，返回 (receive_id, id_type)。未配置时返回 (None, None)。"""
     if chat_id:
         return chat_id, "chat_id"
     if _DEFAULT_USER_OPEN_ID:
         return _DEFAULT_USER_OPEN_ID, "open_id"
-    return _get_default_chat_id(), "chat_id"
+    default_chat_id = _get_default_chat_id()
+    if default_chat_id:
+        return default_chat_id, "chat_id"
+    return None, None
 
 
 def send_image(image_path: str, text: str = "", chat_id: str = ""):
@@ -131,6 +132,9 @@ def send_image(image_path: str, text: str = "", chat_id: str = ""):
         chat_id: 目标聊天 ID，默认发私聊（需设置 FEISHU_USER_OPEN_ID）
     """
     receive_id, id_type = _resolve_target(chat_id)
+    if receive_id is None:
+        print("[飞书] 未配置通知目标，跳过图片发送")
+        return
     app_id, app_secret = _load_env()
     token = _get_tenant_token(app_id, app_secret)
     if text:
@@ -149,6 +153,9 @@ def send_text(text: str, chat_id: str = ""):
         chat_id: 目标聊天 ID，默认发私聊（需设置 FEISHU_USER_OPEN_ID）
     """
     receive_id, id_type = _resolve_target(chat_id)
+    if receive_id is None:
+        print("[飞书] 未配置通知目标，跳过消息发送")
+        return
     app_id, app_secret = _load_env()
     token = _get_tenant_token(app_id, app_secret)
     _send_message(token, receive_id, "text", json.dumps({"text": text}), id_type)

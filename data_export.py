@@ -178,6 +178,8 @@ def create_chrome_driver(download_dir):
     options.add_argument('--no-first-run')
     options.add_argument('--no-default-browser-check')
     options.add_argument('--disable-extensions')
+    # 启用远程调试端口，供后续 Playwright 连接复用浏览器
+    options.add_argument('--remote-debugging-port=9222')
 
     # 隐藏"正受到自动测试软件的控制"提示，防止部分OA系统检测到Selenium而主动退登
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -546,6 +548,7 @@ def main():
     start_date = config['date_range']['start_date']
     end_date = config['date_range']['end_date']
 
+    driver = None
     download_dir = os.path.join(os.getcwd(), "downloads")
     os.makedirs(download_dir, exist_ok=True)
 
@@ -618,25 +621,34 @@ def main():
         print("请扫描二维码登录，等待中...")
 
         # 等待登录完成（最多5分钟）
+        login_success = False
         for _ in range(300):
             time.sleep(1)
             try:
                 driver.switch_to.default_content()
                 current_url = driver.current_url
+                # 检测URL变化（离开登录页）
                 if 'login' not in current_url.lower() and 'sso' not in current_url.lower() and 'cas' not in current_url.lower():
-                    print("检测到页面跳转，登录可能成功...")
+                    print("检测到页面跳转，已离开登录页")
+                    # 等待页面加载完成
+                    time.sleep(5)
+                    login_success = True
                     break
+                # 检测菜单元素（备用检测）
                 if driver.find_elements(By.CSS_SELECTOR, 'li[data-id="00050007"]'):
+                    print("检测到菜单元素，登录成功！")
+                    login_success = True
                     break
             except Exception:
                 pass
 
-        # 最终确认登录状态
-        print("等待登录完成...")
-        WebDriverWait(driver, 60).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, 'li[data-id="00050007"]'))
-        )
-        print("登录成功！")
+        if not login_success:
+            print("等待登录超时，请检查是否已扫码登录")
+            # 即使超时也继续尝试，不中断流程
+            time.sleep(3)
+
+        print("登录完成，继续执行...")
+        time.sleep(2)
 
         # 登录后页面跳转，重新设置缩放
         time.sleep(2)
@@ -958,11 +970,7 @@ def main():
     except Exception as e:
         print(f"发生错误: {e}")
     finally:
-        print("\n所有项目处理完成，关闭浏览器...")
-        time.sleep(3)
-        driver.quit()
-        _active_driver = None
-        time.sleep(2)  # 等待Chrome将cookie等数据写入磁盘
+        print("\n所有项目处理完成，浏览器保持打开状态以便后续步骤复用...")
 
         # 输出导出报告
         print("\n" + "=" * 60)
@@ -1008,6 +1016,8 @@ def main():
                     updated_count += 1
             wb_proj.save('projList.xlsx')
             print(f"\n已回写 {updated_count} 个链接到 projList.xlsx")
+
+    return driver
 
 
 if __name__ == "__main__":

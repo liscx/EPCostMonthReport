@@ -20,7 +20,7 @@ def load_config():
 
 
 def download_revenue(start_date, end_date, url="https://dui.epoint.com.cn/transferplatform/pages/transferplatform/yfw/strategicmaplist",
-                     download_button_selector="#dataexport .mini-button-text"):
+                     download_button_selector="#dataexport .mini-button-text", debug_port=9222):
     """
     使用浏览器自动化下载专区收益统计数据
 
@@ -29,6 +29,7 @@ def download_revenue(start_date, end_date, url="https://dui.epoint.com.cn/transf
         end_date: 结束日期，格式 YYYY-MM-DD
         url: 目标网站URL
         download_button_selector: 下载按钮的CSS选择器
+        debug_port: Chrome 远程调试端口，用于连接已有的浏览器实例
 
     Returns:
         下载文件的路径，失败返回None
@@ -55,12 +56,29 @@ def download_revenue(start_date, end_date, url="https://dui.epoint.com.cn/transf
     month_str = ",".join(map(str, month_values))
     print(f"日期范围: {start_date} ~ {end_date}, 选择月份: {month_str}")
 
+    p = None
     browser = None
     try:
         p = sync_playwright().start()
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context(accept_downloads=True)
-        page = context.new_page()
+
+        # 尝试连接到已有的 Chrome 实例
+        try:
+            print(f"尝试连接到已有 Chrome 实例 (端口: {debug_port})...")
+            browser = p.chromium.connect_over_cdp(f"http://localhost:{debug_port}")
+            print("成功连接到已有 Chrome 实例")
+            # 获取已有的上下文和页面，或创建新页面
+            contexts = browser.contexts
+            if contexts:
+                context = contexts[0]
+                page = context.new_page()
+            else:
+                context = browser.new_context(accept_downloads=True)
+                page = context.new_page()
+        except Exception as connect_err:
+            print(f"连接已有实例失败: {connect_err}，启动新浏览器...")
+            browser = p.chromium.launch(headless=False)
+            context = browser.new_context(accept_downloads=True)
+            page = context.new_page()
 
         print(f"正在打开: {url}")
         page.goto(url, wait_until="networkidle")
@@ -91,21 +109,31 @@ def download_revenue(start_date, end_date, url="https://dui.epoint.com.cn/transf
 
             print("请扫描二维码登录，等待中（最多5分钟）...")
             # 等待登录完成（URL变化或菜单出现）
+            login_success = False
             for _ in range(300):
                 page.wait_for_timeout(1000)
                 try:
                     new_url = page.url
                     if 'login' not in new_url.lower() and 'sso' not in new_url.lower() and 'cas' not in new_url.lower():
-                        print("检测到页面跳转，登录成功！")
+                        print("检测到页面跳转，已离开登录页")
+                        page.wait_for_timeout(5000)
+                        login_success = True
                         break
                     if page.query_selector('li[data-id="00050007"]'):
                         print("检测到菜单元素，登录成功！")
+                        login_success = True
                         break
                 except Exception:
                     pass
-            page.wait_for_timeout(3000)
+
+            if not login_success:
+                print("等待登录超时，请检查是否已扫码登录")
+                page.wait_for_timeout(3000)
+            else:
+                print("登录完成，继续执行...")
+                page.wait_for_timeout(2000)
         else:
-            print("未检测到登录页，继续执行...")
+            print("未检测到登录页，已登录状态，继续执行...")
 
         # 设置月份
         try:
@@ -137,21 +165,14 @@ def download_revenue(start_date, end_date, url="https://dui.epoint.com.cn/transf
         download.save_as(save_path)
         print(f"文件已保存到: {save_path}")
 
-        browser.close()
-        p.stop()
         return save_path
 
     except Exception as e:
         print(f"下载过程中出错: {str(e)}")
-        if browser:
-            try:
-                browser.close()
-            except:
-                pass
         return None
 
 
-def main():
+def main(debug_port=9222):
     config = load_config()
     start_date = config['date_range']['start_date']
     end_date = config['date_range']['end_date']
@@ -161,7 +182,7 @@ def main():
     print(f"日期范围: {start_date} ~ {end_date}")
     print(f"{'='*60}")
 
-    result = download_revenue(start_date, end_date)
+    result = download_revenue(start_date, end_date, debug_port=debug_port)
     if result is None:
         print("收益数据下载失败")
         return False
