@@ -29,7 +29,7 @@ if _config_year:
 else:
     DATA_YEAR = str(datetime.now().year)[2:]
 YEAR_REVENUE_COL = f'{DATA_YEAR}年收益'
-CURRENT_CONTRACT_PREFIX = f'C{int(DATA_YEAR) + 1}'
+CURRENT_CONTRACT_PREFIX = f'C{2000 + int(DATA_YEAR) + 1}'
 
 start_date = config['date_range']['start_date']
 end_date = config['date_range']['end_date']
@@ -64,7 +64,8 @@ def main():
         df = df.drop(index=[r - 2 for r in shaded_rows if r - 2 < len(df)]).reset_index(drop=True)
         print(f"过滤带底纹行: {len(shaded_rows)} 行, 剩余: {len(df)} 行")
 
-    is_new = df['合同编号'].astype(str).str.startswith(CURRENT_CONTRACT_PREFIX)
+    # 核定总额50000的都是新开专区
+    is_new = df['核定总额'] == 50000
     df['专属属性'] = is_new.map({True: '新开', False: '历史'})
 
     new_count = is_new.sum()

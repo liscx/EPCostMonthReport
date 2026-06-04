@@ -153,9 +153,9 @@ def download_revenue(start_date, end_date, url="https://dui.epoint.com.cn/transf
         # 点击导出按钮
         export_button_selector = "#mini-4-action"
         print("查找导出按钮...")
-        page.wait_for_selector(export_button_selector, timeout=10000)
+        page.wait_for_selector(export_button_selector, timeout=60000)
         print("点击导出按钮...")
-        with page.expect_download(timeout=120000) as download_info:
+        with page.expect_download(timeout=480000) as download_info:
             page.click(export_button_selector)
 
         download = download_info.value
