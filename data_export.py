@@ -237,16 +237,22 @@ def get_latest_download(download_dir):
 
 
 def consolidate_to_master(project_name, download_dir, master_file="汇总表.xlsx"):
-    """将导出的数据汇总到总表"""
+    """将导出的数据汇总到总表，返回是否成功"""
     latest_file = get_latest_download(download_dir)
     if not latest_file:
         print(f"  未找到下载的文件")
-        return
+        return False
 
     print(f"  读取下载文件: {latest_file}")
 
     try:
         df = pd.read_excel(latest_file)
+
+        # 检查数据是否为空
+        if df.empty:
+            print(f"  数据为空，跳过汇总")
+            os.remove(latest_file)
+            return False
 
         if os.path.exists(master_file):
             with pd.ExcelWriter(master_file, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
@@ -261,9 +267,11 @@ def consolidate_to_master(project_name, download_dir, master_file="汇总表.xls
 
         os.remove(latest_file)
         print(f"  已删除原始下载文件")
+        return True
 
     except Exception as e:
         print(f"  汇总失败: {e}")
+        return False
 
 
 def calc_date_segments(start_date_str, end_date_str, seg_months=3):
@@ -565,6 +573,7 @@ def main():
     segment_months = split_config.get('segment_months', 3) if isinstance(split_config, dict) else 3
     export_report = []
     project_urls = {}
+    empty_projects = []
 
     # 统计有URL和无URL的项目
     projects_with_url = [(name, url) for name, url in projects if url]
@@ -591,10 +600,6 @@ def main():
         # 等待页面加载
         time.sleep(5)
 
-        # 设置页面缩放为75%
-        driver.execute_script("document.body.style.zoom = '0.75'")
-        time.sleep(1)
-
         # 每次都是全新浏览器，直接点击 #code 生成二维码
         qr_screenshot_path = os.path.join(os.getcwd(), "qr_code.png")
         print("点击 #code 生成二维码...")
@@ -618,42 +623,11 @@ def main():
             print(f"QR_SCREENSHOT:{qr_screenshot_path}")
             feishu_send_image(qr_screenshot_path, "OA 登录二维码已生成，请扫码登录：", GROUP_CHAT_ID)
 
-        print("请扫描二维码登录，等待中...")
-
-        # 等待登录完成（最多5分钟）
-        login_success = False
-        for _ in range(300):
-            time.sleep(1)
-            try:
-                driver.switch_to.default_content()
-                current_url = driver.current_url
-                # 检测URL变化（离开登录页）
-                if 'login' not in current_url.lower() and 'sso' not in current_url.lower() and 'cas' not in current_url.lower():
-                    print("检测到页面跳转，已离开登录页")
-                    # 等待页面加载完成
-                    time.sleep(5)
-                    login_success = True
-                    break
-                # 检测菜单元素（备用检测）
-                if driver.find_elements(By.CSS_SELECTOR, 'li[data-id="00050007"]'):
-                    print("检测到菜单元素，登录成功！")
-                    login_success = True
-                    break
-            except Exception:
-                pass
-
-        if not login_success:
-            print("等待登录超时，请检查是否已扫码登录")
-            # 即使超时也继续尝试，不中断流程
-            time.sleep(3)
-
-        print("登录完成，继续执行...")
-        time.sleep(2)
-
-        # 登录后页面跳转，重新设置缩放
-        time.sleep(2)
-        driver.execute_script("document.body.style.zoom = '0.75'")
-        time.sleep(1)
+        print("请扫码登录...")
+        WebDriverWait(driver, 120).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'li[data-id="00050007"]'))
+        )
+        print("登录成功！")
 
         # 第一步：先处理无URL的项目（使用搜索方式）
         if projects_without_url:
@@ -791,10 +765,6 @@ def main():
                         task_link = WebDriverWait(driver, 10).until(
                             EC.element_to_be_clickable((By.ID, '任务'))
                         )
-                        task_href = task_link.get_attribute('href')
-                        if task_href:
-                            project_urls[project_name] = task_href
-                            print(f"  获取链接: {task_href}")
                         try:
                             task_link.click()
                         except Exception:
@@ -821,100 +791,86 @@ def main():
                         if not task_iframe_found:
                             print("    未找到任务列表 iframe，尝试直接定位...")
 
-                        # 判断是否需要分段导出（只要在配置列表中就分段）
-                        need_split = project_name in split_projects
-
-                        if need_split:
-                            # 分段导出模式：先展开条件，再按段循环
-                            segments = calc_date_segments(start_date, end_date, seg_months=segment_months)
-                            print(f"  分段导出模式: 每段{segment_months}个月, 共 {len(segments)} 段")
-                            segment_files = []
-
-                            for seg_idx, (seg_start, seg_end) in enumerate(segments, 1):
-                                print(f"  --- 第 {seg_idx}/{len(segments)} 段: {seg_start} ~ {seg_end} ---")
-
-                                # 点击展开更多条件（每段都需要重新展开）
-                                try:
-                                    wait_mask_disappear(driver, 30)
-                                    expand_btn = WebDriverWait(driver, 60).until(
-                                        EC.element_to_be_clickable((By.CSS_SELECTOR, '.cond-srh-btn-toggle'))
-                                    )
-                                    try:
-                                        expand_btn.click()
-                                    except Exception:
-                                        driver.execute_script("arguments[0].click();", expand_btn)
-                                    time.sleep(3)
-                                except Exception as e:
-                                    print(f"    展开按钮未找到: {e}")
-
-                                existing_files = set(glob.glob(os.path.join(download_dir, "*.xlsx"))
-                                                    + glob.glob(os.path.join(download_dir, "*.xls")))
-
-                                ok = set_date_and_search(driver, seg_start, seg_end)
-                                if not ok:
-                                    break
-                                ok = click_export_btn(driver)
-                                if not ok:
-                                    break
-
-                                new_file = wait_for_new_file(download_dir, existing_files)
-                                if new_file:
-                                    segment_files.append(new_file)
-                                    print(f"    第 {seg_idx} 段导出成功")
-                                else:
-                                    print(f"    第 {seg_idx} 段未下载到文件")
-                                    break
-
-                            if segment_files:
-                                merge_ok = consolidate_segments_to_master(project_name, segment_files, master_file)
-                                if merge_ok:
-                                    export_report.append({'name': project_name, 'status': 'success',
-                                                         'segments': len(segments), 'detail': '分段导出成功'})
-                                else:
-                                    export_report.append({'name': project_name, 'status': 'failed',
-                                                         'segments': len(segments), 'detail': '分段合并失败'})
-                            else:
-                                export_report.append({'name': project_name, 'status': 'failed',
-                                                     'segments': len(segments), 'detail': '所有分段均无数据'})
-                        else:
-                            # 普通导出模式
-                            print("  点击展开更多条件...")
+                        print("  点击展开更多条件...")
+                        try:
+                            wait_mask_disappear(driver)
+                            expand_btn = WebDriverWait(driver, 10).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, '.cond-srh-btn-toggle'))
+                            )
                             try:
-                                wait_mask_disappear(driver, 30)
-                                expand_btn = WebDriverWait(driver, 60).until(
-                                    EC.element_to_be_clickable((By.CSS_SELECTOR, '.cond-srh-btn-toggle'))
-                                )
-                                try:
-                                    expand_btn.click()
-                                except Exception:
-                                    driver.execute_script("arguments[0].click();", expand_btn)
-                                time.sleep(3)
-                                print("    展开成功")
-                            except Exception as e:
-                                print(f"    展开按钮未找到: {e}")
+                                expand_btn.click()
+                            except Exception:
+                                driver.execute_script("arguments[0].click();", expand_btn)
+                            time.sleep(2)
+                            print("    展开成功")
+                        except Exception as e:
+                            print(f"    展开按钮未找到: {e}")
 
-                            existing_files = set(glob.glob(os.path.join(download_dir, "*.xlsx"))
-                                                + glob.glob(os.path.join(download_dir, "*.xls")))
-                            ok = set_date_and_search(driver, start_date, end_date)
-                            if ok:
-                                ok = click_export_btn(driver)
-                            if ok:
-                                new_file = wait_for_new_file(download_dir, existing_files)
-                                if new_file:
-                                    consolidate_to_master(project_name, download_dir, master_file)
-                                    export_report.append({'name': project_name, 'status': 'success',
-                                                         'segments': 1, 'detail': '普通导出成功'})
-                                else:
-                                    export_report.append({'name': project_name, 'status': 'failed',
-                                                         'segments': 1, 'detail': '导出超时未下载到文件'})
-                            else:
-                                export_report.append({'name': project_name, 'status': 'failed',
-                                                     'segments': 1, 'detail': '导出失败'})
+                        print("  设置日期筛选...")
+                        try:
+                            wait_mask_disappear(driver)
+                            start_input = WebDriverWait(driver, 10).until(
+                                EC.presence_of_element_located((By.ID, 'realbegindate$text'))
+                            )
+                            driver.execute_script(
+                                "document.getElementById('realbegindate$value').value = arguments[0];"
+                                "document.getElementById('realbegindate$text').value = arguments[0];"
+                                "var obj = mini.get('realbegindate'); if(obj) obj.setValue(arguments[0]);",
+                                start_date
+                            )
+                            time.sleep(1)
+
+                            end_input = driver.find_element(By.ID, 'realfinishdate$text')
+                            driver.execute_script(
+                                "document.getElementById('realfinishdate$value').value = arguments[0];"
+                                "document.getElementById('realfinishdate$text').value = arguments[0];"
+                                "var obj = mini.get('realfinishdate'); if(obj) obj.setValue(arguments[0]);",
+                                end_date
+                            )
+                            time.sleep(1)
+                            print(f"    日期设置完成: {start_date} ~ {end_date}")
+                        except Exception as e:
+                            print(f"    日期设置失败: {e}")
+
+                        print("  点击搜索...")
+                        try:
+                            wait_mask_disappear(driver)
+                            search_btn = WebDriverWait(driver, 10).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, '.cond-srh-btn-text'))
+                            )
+                            try:
+                                search_btn.click()
+                            except Exception:
+                                driver.execute_script("arguments[0].click();", search_btn)
+                            time.sleep(5)
+                            wait_mask_disappear(driver, 15)
+                            print("    搜索完成")
+                        except Exception as e:
+                            print(f"    搜索失败: {e}")
+
+                        print("  点击导出Excel...")
+                        try:
+                            wait_mask_disappear(driver)
+                            export_btn = WebDriverWait(driver, 10).until(
+                                EC.element_to_be_clickable((By.ID, 'export'))
+                            )
+                            try:
+                                export_btn.click()
+                            except Exception:
+                                driver.execute_script("arguments[0].click();", export_btn)
+                            time.sleep(8)
+                            wait_mask_disappear(driver, 15)
+                            print("    导出完成")
+
+                            success = consolidate_to_master(project_name, download_dir, master_file)
+                            if not success:
+                                empty_projects.append(project_name)
+                        except Exception as e:
+                            print(f"    导出失败: {e}")
+                            empty_projects.append(project_name)
 
                     except Exception as e:
                         print(f"  任务操作失败: {e}")
-                        export_report.append({'name': project_name, 'status': 'failed',
-                                             'segments': 0, 'detail': f'任务操作失败: {e}'})
 
                     print("  关闭详情页标签...")
                     try:
@@ -945,8 +901,6 @@ def main():
 
                 except Exception as e:
                     print(f"  点击第一条结果失败: {e}")
-                    export_report.append({'name': project_name, 'status': 'failed',
-                                         'segments': 0, 'detail': f'进入详情页失败: {e}'})
 
         # 第二步：处理有URL的项目（直接访问URL）
         if projects_with_url:
@@ -971,6 +925,15 @@ def main():
         print(f"发生错误: {e}")
     finally:
         print("\n所有项目处理完成，浏览器保持打开状态以便后续步骤复用...")
+
+        # 保存数据为空的项目到日志文件
+        if empty_projects:
+            log_file = os.path.join(os.getcwd(), "logs.txt")
+            with open(log_file, 'w', encoding='utf-8') as f:
+                f.write(f"数据为空的项目 ({len(empty_projects)} 个):\n")
+                for project in empty_projects:
+                    f.write(f"- {project}\n")
+            print(f"\n已将 {len(empty_projects)} 个数据为空的项目记录到: {log_file}")
 
         # 输出导出报告
         print("\n" + "=" * 60)
