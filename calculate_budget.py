@@ -37,13 +37,13 @@ def calc_quota(row):
     month = int(contract_id[5:7])
     is_revenue_empty = pd.isna(revenue) or revenue == 0
 
-    # 1. 当年合同 → 新开专区，固定50000
+    # 1. 当年合同 → 固定50000
     if year == DATA_YEAR:
-        return 50000, f'{DATA_YEAR}年新开专区，核定总额=50000'
+        return 50000, f'{DATA_YEAR}年合同，核定总额=50000'
 
-    # 2. 上年10月及以后开设且收益为空或0 → 新开专区，50000
+    # 2. 上年10月及以后开设且收益为空或0 → 50000
     if year == DATA_YEAR - 1 and month >= 10 and is_revenue_empty:
-        return 50000, f'{DATA_YEAR - 1}年{month}月开设，收益为空或0，新开专区，核定总额=50000'
+        return 50000, f'{DATA_YEAR - 1}年{month}月开设，收益为空或0，核定总额=50000'
 
     # 3. 上年10月之前且收益为空或0 → 保底32000
     if year == DATA_YEAR - 1 and month < 10 and is_revenue_empty:
@@ -53,7 +53,7 @@ def calc_quota(row):
     if year < DATA_YEAR - 1 and is_revenue_empty:
         return 32000, f'{year}年合同，收益为空或0，保底32000'
 
-    # 5. 上年合同（10月之前，收益≠0）→ 年化收益×0.3，最低32000
+    # 5. 上年合同（收益≠0）→ 年化收益×0.3，最低32000
     if year == DATA_YEAR - 1:
         if month == 12:
             annual_revenue = revenue * 12
