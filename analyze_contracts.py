@@ -64,8 +64,10 @@ def main():
         df = df.drop(index=[r - 2 for r in shaded_rows if r - 2 < len(df)]).reset_index(drop=True)
         print(f"过滤带底纹行: {len(shaded_rows)} 行, 剩余: {len(df)} 行")
 
-    # 核定总额50000的都是新开专区
-    is_new = df['核定总额'] == 50000
+    # 从合同编号解析年份，当年合同为新开专区
+    contract_year = df['合同编号'].str[1:5].astype(int)
+    current_year = int(f'20{DATA_YEAR}')
+    is_new = contract_year == current_year
     df['专属属性'] = is_new.map({True: '新开', False: '历史'})
 
     new_count = is_new.sum()
