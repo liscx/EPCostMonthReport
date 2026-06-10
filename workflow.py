@@ -9,8 +9,8 @@ sys.stdout.reconfigure(encoding='utf-8')
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 WORKFLOW = [
-    ('data_export', '数据导出'),
-    ('shouyi_export', '收益导出'),
+    # ('data_export', '数据导出'),
+    # ('shouyi_export', '收益导出'),
     ('extract_contracts', '合同匹配'),
     ('calculate_budget', '计算核定总额'),
     ('fill_revenue', '收益回填'),

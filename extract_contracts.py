@@ -21,6 +21,7 @@ if _config_year:
 else:
     DATA_YEAR_SHORT = str(datetime.now().year)[2:]
 YEAR_REVENUE_COL = f'{DATA_YEAR_SHORT}年收益'
+PRIOR_YEAR_REVENUE_COL = f'{int(DATA_YEAR_SHORT) - 1}年收益'
 
 start_date = config['date_range']['start_date']
 end_date = config['date_range']['end_date']
@@ -154,6 +155,7 @@ def match_contracts(cost_dict, summary_df):
                 '商务': str(row['商务']) if pd.notna(row.get('商务', '')) else '',
                 '专区码': '',
                 '核定总额': row.get('核定总额', ''),
+                PRIOR_YEAR_REVENUE_COL: row.get(PRIOR_YEAR_REVENUE_COL, ''),
                 YEAR_REVENUE_COL: row.get(YEAR_REVENUE_COL, ''),
                 '核定总额计算规则': str(row.get('核定总额计算规则', '')) if pd.notna(row.get('核定总额计算规则', '')) else '',
             })
@@ -192,6 +194,7 @@ def match_contracts(cost_dict, summary_df):
                 '商务': str(row['商务']) if pd.notna(row.get('商务', '')) else '',
                 '专区码': zone_code,
                 '核定总额': row.get('核定总额', ''),
+                PRIOR_YEAR_REVENUE_COL: row.get(PRIOR_YEAR_REVENUE_COL, ''),
                 YEAR_REVENUE_COL: row.get(YEAR_REVENUE_COL, ''),
                 '核定总额计算规则': str(row.get('核定总额计算规则', '')) if pd.notna(row.get('核定总额计算规则', '')) else '',
             })
@@ -206,6 +209,7 @@ def match_contracts(cost_dict, summary_df):
                 '商务': str(row['商务']) if pd.notna(row.get('商务', '')) else '',
                 '专区码': zone_code,
                 '核定总额': row.get('核定总额', ''),
+                PRIOR_YEAR_REVENUE_COL: row.get(PRIOR_YEAR_REVENUE_COL, ''),
                 YEAR_REVENUE_COL: row.get(YEAR_REVENUE_COL, ''),
                 '核定总额计算规则': str(row.get('核定总额计算规则', '')) if pd.notna(row.get('核定总额计算规则', '')) else '',
             })
@@ -260,6 +264,7 @@ def match_unmatched_ejy(cost_dict, matched_in_summary, summary_df):
             '商务': info.get('商务', ''),
             '专区码': info.get('专区码', ''),
             '核定总额': '',
+            PRIOR_YEAR_REVENUE_COL: '',
             YEAR_REVENUE_COL: '',
             '核定总额计算规则': '',
         })

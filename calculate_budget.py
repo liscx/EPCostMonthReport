@@ -18,8 +18,8 @@ if _config_year:
 else:
     DATA_YEAR_SHORT = str(datetime.now().year)[2:]
 DATA_YEAR = int(f'20{DATA_YEAR_SHORT}')
-NEXT_YEAR = DATA_YEAR + 1
 YEAR_REVENUE_COL = f'{DATA_YEAR_SHORT}年收益'
+PRIOR_YEAR_REVENUE_COL = f'{int(DATA_YEAR_SHORT) - 1}年收益'
 
 start_date = config['date_range']['start_date']
 end_date = config['date_range']['end_date']
@@ -31,47 +31,49 @@ end_str = end_date.replace('-', '')
 
 def calc_quota(row):
     contract_id = str(row['合同编号'])
-    revenue = row[YEAR_REVENUE_COL]
+    revenue = row[PRIOR_YEAR_REVENUE_COL]
 
     year = int(contract_id[1:5])
+    month = int(contract_id[5:7])
+    is_revenue_empty = pd.isna(revenue) or revenue == 0
 
-    # 1. 当前年+1：新开专区，固定50000
-    if year == NEXT_YEAR:
-        return 50000, f'{NEXT_YEAR}年新开专区，核定总额=50000'
-
-    # 2. 当前年10月之后，收益为空或为0，按50000算
+    # 1. 当年合同 → 新开专区，固定50000
     if year == DATA_YEAR:
-        month = int(contract_id[5:7])
-        if month >= 10 and (pd.isna(revenue) or revenue == 0):
-            return 50000, f'{DATA_YEAR}年{month}月开设，收益为空或0，新开专区，核定总额=50000'
+        return 50000, f'{DATA_YEAR}年新开专区，核定总额=50000'
 
-    # 3. 当前年10月之前收益为空或为0，保底32000
-    if year == DATA_YEAR and month < 10 and (pd.isna(revenue) or revenue == 0):
-        return 32000, f'{DATA_YEAR}年{month}月开设，收益为空或0，保底32000'
+    # 2. 上年10月及以后开设且收益为空或0 → 新开专区，50000
+    if year == DATA_YEAR - 1 and month >= 10 and is_revenue_empty:
+        return 50000, f'{DATA_YEAR - 1}年{month}月开设，收益为空或0，新开专区，核定总额=50000'
 
-    # 4. 收益为空或为0（当前年之前），保底32000
-    if pd.isna(revenue) or revenue == 0:
-        return 32000, '收益为空或0，保底32000'
+    # 3. 上年10月之前且收益为空或0 → 保底32000
+    if year == DATA_YEAR - 1 and month < 10 and is_revenue_empty:
+        return 32000, f'{DATA_YEAR - 1}年{month}月开设，收益为空或0，保底32000'
 
-    # 5. 当前年合同（10月之前，收益不为0）：年化收益×0.3，最低32000
-    if year == DATA_YEAR:
-        months = 12 - month
-        if months <= 0:
-            quota = revenue * 0.3
-            return max(quota, 32000), f'{DATA_YEAR}年{month}月开设，收益×0.3={quota:.0f}'
-        annual_revenue = revenue / months * 12
+    # 4. 上年之前且收益为空或0 → 保底32000
+    if year < DATA_YEAR - 1 and is_revenue_empty:
+        return 32000, f'{year}年合同，收益为空或0，保底32000'
+
+    # 5. 上年合同（10月之前，收益≠0）→ 年化收益×0.3，最低32000
+    if year == DATA_YEAR - 1:
+        if month == 12:
+            annual_revenue = revenue * 12
+            desc = f'{DATA_YEAR - 1}年12月开设，1个月收益，年化={annual_revenue:.0f}，×0.3={annual_revenue * 0.3:.0f}'
+        else:
+            months = 12 - month
+            annual_revenue = revenue / months * 12
+            desc = f'{DATA_YEAR - 1}年{month}月开设，{months}个月收益，年化={annual_revenue:.0f}，×0.3={annual_revenue * 0.3:.0f}'
         quota = annual_revenue * 0.3
         if quota >= 32000:
-            return quota, f'{DATA_YEAR}年{month}月开设，{months}个月收益，年化={annual_revenue:.0f}，×0.3={quota:.0f}'
+            return quota, desc
         else:
-            return 32000, f'{DATA_YEAR}年{month}月开设，{months}个月收益，年化={annual_revenue:.0f}，×0.3={quota:.0f}<32000，保底32000'
+            return 32000, f'{desc}<32000，保底32000'
 
-    # 6. 当前年之前合同：收益×0.3，最低32000
+    # 6. 上年之前合同（收益≠0）→ 收益×0.3，最低32000
     quota = revenue * 0.3
     if quota >= 32000:
-        return quota, f'{DATA_YEAR}年前合同，收益×0.3={quota:.0f}'
+        return quota, f'{year}年合同，收益×0.3={quota:.0f}'
     else:
-        return 32000, f'{DATA_YEAR}年前合同，收益×0.3={quota:.0f}<32000，保底32000'
+        return 32000, f'{year}年合同，收益×0.3={quota:.0f}<32000，保底32000'
 
 
 
@@ -93,7 +95,9 @@ def main():
 
     # 计算核定总额和计算规则（仅对空值计算）
     if mask.any():
-        df.loc[mask, ['核定总额', '核定总额计算规则']] = df[mask].apply(calc_quota, axis=1, result_type='expand')
+        df['核定总额计算规则'] = df['核定总额计算规则'].astype(object)
+        calc_result = df[mask].apply(calc_quota, axis=1, result_type='expand')
+        df.loc[mask, ['核定总额', '核定总额计算规则']] = calc_result.values
 
     # 用openpyxl原地更新，保留底纹等格式
     wb = openpyxl.load_workbook(output_file)
@@ -118,7 +122,7 @@ def main():
     print(f'总记录数: {len(df)}')
     print(f'已有核定总额（跳过）: {existing_count}条')
     print(f'本次计算核定总额: {mask.sum()}条')
-    print(f'核定总额为50000的({NEXT_YEAR}年新开): {len(df[df["核定总额"] == 50000])}条')
+    print(f'核定总额为50000的({DATA_YEAR}年新开): {len(df[df["核定总额"] == 50000])}条')
     print(f'核定总额为32000的(保底): {len(df[df["核定总额"] == 32000])}条')
     print(f'其他核定总额: {len(df[(df["核定总额"] != 32000) & (df["核定总额"] != 50000)])}条')
 
