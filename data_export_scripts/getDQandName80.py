@@ -3,25 +3,49 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from datetime import datetime
+from selenium.webdriver.chrome.service import Service
 import time
 import os
 import glob
 
 
+def _find_local_chromedriver() -> str | None:
+    """在 Selenium 缓存目录中查找本地已有的 chromedriver"""
+    cache_base = os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                              ".cache", "selenium", "chromedriver", "win64")
+    if not os.path.exists(cache_base):
+        return None
+    for v in sorted(os.listdir(cache_base), reverse=True):
+        p = os.path.join(cache_base, v, "chromedriver-win64", "chromedriver.exe")
+        if os.path.exists(p):
+            print(f"  使用本地缓存 chromedriver: {v}")
+            return p
+    return None
+
+
 def main():
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
+
     # 配置 Chrome 选项
     chrome_options = Options()
     chrome_options.add_argument("--start-maximized")
     # 设置下载目录
-    download_dir = r"D:\MonthReport\中间数据"
+    download_dir = os.path.join(PROJECT_DIR, "中间数据")
+    os.makedirs(download_dir, exist_ok=True)
     prefs = {
         "download.default_directory": download_dir,
         "download.prompt_for_download": False,
     }
     chrome_options.add_experimental_option("prefs", prefs)
 
-    driver = webdriver.Chrome(options=chrome_options)
+    driver_path = _find_local_chromedriver()
+    if driver_path:
+        service = Service(executable_path=driver_path)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+    else:
+        print("  本地未找到 chromedriver，使用 Selenium Manager 自动配置...")
+        driver = webdriver.Chrome(options=chrome_options)
     wait = WebDriverWait(driver, 30)
 
     try:
@@ -152,8 +176,7 @@ def main():
         time.sleep(10)
 
         # 14. 重命名下载的文件
-        today = datetime.now().strftime("%Y%m%d")
-        new_filename = f"80DQ{today}"
+        new_filename = "80DQ"
 
         # 查找最新下载的文件
         files = glob.glob(os.path.join(download_dir, "*"))

@@ -11,9 +11,6 @@ getDQandName70.py
 import sys
 import os
 import time
-import subprocess
-import zipfile
-import urllib.request
 import pandas as pd
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -26,10 +23,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # ─── 配置 ───────────────────────────────────────────────
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
+OUTPUT_FILE = os.path.join(PROJECT_DIR, "中间数据", "70DQ.xlsx")
 TARGET_URL  = "https://www.etrading.cn/PSPFrame/workbenchmis/pages/regionapply/QuickReference_List"
-from datetime import datetime
-today = datetime.now().strftime("%Y%m%d")
-OUTPUT_FILE = os.path.join(r"D:\MonthReport\中间数据", f"70DQ{today}.xlsx")
 
 # 列结构（0-based 在 tr 的所有 td 中）：
 #   td[0]=空占位, td[1]=checkbox, td[2]=序号,
@@ -41,58 +38,23 @@ COL_INDICES = [3, 4, 5, 6, 7, 8]   # 对应上面列名的 td 索引
 # ────────────────────────────────────────────────────────
 
 
-# ── chromedriver 自动管理 ────────────────────────────────
-def _get_chrome_version() -> str | None:
-    try:
-        result = subprocess.run(
-            ["reg", "query",
-             r"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows"
-             r"\CurrentVersion\Uninstall\Google Chrome",
-             "/v", "version"],
-            capture_output=True, text=True, encoding="gbk", timeout=10,
-        )
-        for line in result.stdout.splitlines():
-            if "version" in line.lower() and "REG_SZ" in line:
-                return line.split("REG_SZ")[-1].strip()
-    except Exception:
-        pass
+# ── chromedriver 本地管理 ────────────────────────────────
+def _find_local_chromedriver() -> str | None:
+    """在 Selenium 缓存目录中查找本地已有的 chromedriver"""
+    cache_base = os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                              ".cache", "selenium", "chromedriver", "win64")
+    if not os.path.exists(cache_base):
+        return None
+    # 遍历缓存目录，找最新版本的 chromedriver
+    for v in sorted(os.listdir(cache_base), reverse=True):
+        p = os.path.join(cache_base, v, "chromedriver-win64", "chromedriver.exe")
+        if os.path.exists(p):
+            print(f"  使用本地缓存 chromedriver: {v}")
+            return p
     return None
 
 
-def _get_chromedriver_service(ver: str) -> Service:
-    major = ver.split(".")[0]
-    base  = os.path.join(os.environ.get("LOCALAPPDATA", ""),
-                         ".cache", "selenium", "chromedriver", "win64")
-    exact = os.path.join(base, ver, "chromedriver-win64", "chromedriver.exe")
-    if os.path.exists(exact):
-        return Service(executable_path=exact)
-    if os.path.exists(base):
-        for v in os.listdir(base):
-            if v.startswith(major + "."):
-                p = os.path.join(base, v, "chromedriver-win64", "chromedriver.exe")
-                if os.path.exists(p):
-                    print(f"  使用同主版本 chromedriver: {v}")
-                    return Service(executable_path=p)
-    print(f"  正在从镜像下载 chromedriver {ver} ...")
-    driver_dir = os.path.join(base, ver, "chromedriver-win64")
-    os.makedirs(driver_dir, exist_ok=True)
-    zip_path = os.path.join(base, ver, "chromedriver-win64.zip")
-    urllib.request.urlretrieve(
-        f"https://registry.npmmirror.com/-/binary/chrome-for-testing/{ver}/win64/chromedriver-win64.zip",
-        zip_path
-    )
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(os.path.join(base, ver))
-    return Service(executable_path=exact)
-
-
 def create_driver() -> webdriver.Chrome:
-    ver = _get_chrome_version()
-    if not ver:
-        raise RuntimeError("未检测到 Chrome，请先安装 Google Chrome")
-    print(f"  Chrome 版本: {ver}")
-    service = _get_chromedriver_service(ver)
-
     opts = Options()
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
@@ -100,7 +62,15 @@ def create_driver() -> webdriver.Chrome:
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
-    return webdriver.Chrome(service=service, options=opts)
+
+    driver_path = _find_local_chromedriver()
+    if driver_path:
+        service = Service(executable_path=driver_path)
+        return webdriver.Chrome(service=service, options=opts)
+
+    # 本地无缓存，使用 Selenium Manager 自动管理（仅首次需要网络）
+    print("  本地未找到 chromedriver，使用 Selenium Manager 自动配置...")
+    return webdriver.Chrome(options=opts)
 
 
 # ── DOM 解析 ─────────────────────────────────────────────
