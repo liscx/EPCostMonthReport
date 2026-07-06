@@ -3,7 +3,8 @@ import os
 import importlib
 import traceback
 import yaml
-from datetime import datetime
+from datetime import datetime, date
+import calendar
 
 sys.stdout.reconfigure(encoding='utf-8')
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -17,6 +18,22 @@ WORKFLOW = [
 def main():
     ts = datetime.now().strftime('%m%d')
     os.environ['WORKFLOW_TIMESTAMP'] = ts
+
+    # auto_range 检测：自动写回日期到 config.yaml
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.yaml')
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    if config.get('auto_range'):
+        today = date.today()
+        auto_start = f"{today.year}-01-01"
+        prev_month = today.month - 1 if today.month > 1 else 12
+        prev_year = today.year if today.month > 1 else today.year - 1
+        last_day = calendar.monthrange(prev_year, prev_month)[1]
+        auto_end = f"{prev_year}-{prev_month:02d}-{last_day:02d}"
+        config['date_range'] = {'start_date': auto_start, 'end_date': auto_end}
+        with open(config_path, 'w', encoding='utf-8') as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+        print(f"[auto_range] 日期已自动更新: {auto_start} ~ {auto_end}")
 
     print(f"\n{'#'*60}")
     print(f"# 完整月报工作流")

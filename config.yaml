@@ -1,6 +1,8 @@
+auto_range: true
 date_range:
   start_date: "2026-01-01"
   end_date: "2026-06-30"
+
 
 # 数据年份简称，如 "25"。留空则根据当前年份自动生成（如2026→"26"）
 dataYear: ""
