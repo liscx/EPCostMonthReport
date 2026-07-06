@@ -44,25 +44,30 @@ def main():
     input_file = f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx'
     output_file = input_file  # 原地更新
 
-    # 先用 openpyxl 读取底纹，过滤掉带底纹的行（红色/黄色=未匹配）
+    # 先用 openpyxl 读取底纹，区分红色和黄色行
     wb_check = openpyxl.load_workbook(input_file)
     ws_check = wb_check['合同汇总'] if '合同汇总' in wb_check.sheetnames else wb_check.active
-    shaded_rows = set()  # 带底纹的行号（1-indexed）
+    red_rows = set()    # 红色底纹行号（1-indexed）：合同汇总表有，projExport没有
+    yellow_rows = set() # 黄色底纹行号（1-indexed）：projExport有，合同汇总表没有
     for row_idx in range(2, ws_check.max_row + 1):
         cell = ws_check.cell(row=row_idx, column=1)
         fill = cell.fill
         if fill and fill.fill_type == 'solid' and fill.start_color and fill.start_color.rgb:
             rgb = str(fill.start_color.rgb)
-            # FF0000=红色, FFFF00=黄色
-            if rgb in ('FF0000', '00FF0000', 'FFFF00', '00FFFF00'):
-                shaded_rows.add(row_idx)
+            if rgb in ('FF0000', '00FF0000'):
+                red_rows.add(row_idx)
+            elif rgb in ('FFFF00', '00FFFF00'):
+                yellow_rows.add(row_idx)
     wb_check.close()
 
     df = pd.read_excel(input_file)
     print(f"读取: {input_file}, 共 {len(df)} 条记录")
-    if shaded_rows:
-        df = df.drop(index=[r - 2 for r in shaded_rows if r - 2 < len(df)]).reset_index(drop=True)
-        print(f"过滤带底纹行: {len(shaded_rows)} 行, 剩余: {len(df)} 行")
+
+    # 只过滤红色底纹行（未匹配），黄色行保留参与计算
+    all_shaded = red_rows | yellow_rows
+    if red_rows:
+        df = df.drop(index=[r - 2 for r in red_rows if r - 2 < len(df)]).reset_index(drop=True)
+        print(f"过滤红色底纹行: {len(red_rows)} 行, 剩余: {len(df)} 行")
 
     # 从合同编号解析年份，当年合同为新开专区
     contract_year = df['合同编号'].str[1:5].astype(int)
@@ -136,7 +141,7 @@ def main():
         # 不符合条件的返回空
         return ''
 
-    # 添加颜色分类列
+    # 所有行（包括黄色底纹）都参与颜色分类
     df['颜色分类'] = df.apply(classify_row, axis=1)
 
     # 统计各颜色数量
@@ -162,9 +167,9 @@ def main():
             ws.cell(row=1, column=next_col, value=col_name)
             headers[col_name] = next_col
 
-    # 写入数据（只写非底纹行）
+    # 写入数据（只写非红色底纹行，黄色行也要写入）
     # 构建 Excel 行号到 df 索引的映射
-    clean_excel_rows = [r for r in range(2, ws.max_row + 1) if r not in shaded_rows]
+    clean_excel_rows = [r for r in range(2, ws.max_row + 1) if r not in red_rows]
     for df_idx, excel_row in enumerate(clean_excel_rows):
         if df_idx >= len(df):
             break
