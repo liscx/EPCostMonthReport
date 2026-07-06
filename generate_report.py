@@ -42,6 +42,8 @@ def main():
     doc = Document(template_file)
 
     # 替换段落中的占位符
+    # 月报月：取结束日期的月份（如6月月报 → 6）
+    report_month = int(end_date.split('-')[1])
     placeholder_map = {
         '{{预算使用总额}}': str(stats['预算使用总额']),
         '{{实际运营收益}}': str(stats['实际运营收益']),
@@ -50,6 +52,7 @@ def main():
         '{{橙色}}': str(stats['橙色专区个数']),
         '{{黄色}}': str(stats['黄色专区个数']),
         '{{绿色}}': str(stats['绿色专区个数']),
+        '{{月报月}}': str(report_month),
     }
 
     for para in doc.paragraphs:
