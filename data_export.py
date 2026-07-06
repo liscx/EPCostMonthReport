@@ -624,16 +624,41 @@ def main():
             feishu_send_image(qr_screenshot_path, "OA 登录二维码已生成，请扫码登录：", GROUP_CHAT_ID)
 
         print("请扫码登录...")
-        WebDriverWait(driver, 120).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, 'li[data-id="00050007"]'))
-        )
-        print("登录成功！")
+        login_success = False
+        for _ in range(120):
+            time.sleep(1)
+            try:
+                new_url = driver.current_url
+                if 'login' not in new_url.lower() and 'sso' not in new_url.lower() and 'cas' not in new_url.lower():
+                    print("检测到页面跳转，已离开登录页")
+                    time.sleep(5)
+                    login_success = True
+                    break
+                if driver.find_elements(By.CSS_SELECTOR, 'li[data-id="00060006"]'):
+                    print("检测到菜单元素，登录成功！")
+                    login_success = True
+                    break
+            except Exception:
+                pass
+        if not login_success:
+            print("等待登录超时，请检查是否已扫码登录")
+            time.sleep(3)
+        else:
+            print("登录成功！")
 
         # 第一步：先处理无URL的项目（使用搜索方式）
         if projects_without_url:
             print(f"\n{'='*60}")
             print(f"第一步：处理无URL的项目 ({len(projects_without_url)} 个)")
             print(f"{'='*60}")
+
+            # 等待页面完全加载（菜单元素出现且可交互）
+            print("等待页面菜单加载...")
+            wait_mask_disappear(driver, 15)
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'li[data-id="00060006"]'))
+            )
+            time.sleep(2)
 
             print("点击项目集菜单...")
             # 先检查是否有菜单触发按钮（页面缩放后可能需要先展开菜单）
@@ -646,7 +671,7 @@ def main():
             except Exception:
                 pass
             try:
-                wait_and_click(driver, By.CSS_SELECTOR, 'li[data-id="00050007"]')
+                wait_and_click(driver, By.CSS_SELECTOR, 'li[data-id="00060006"]')
             except Exception:
                 print("  项目集点击失败，尝试先点击触发按钮...")
                 try:
@@ -654,7 +679,7 @@ def main():
                     if trigger:
                         driver.execute_script("arguments[0].click();", trigger[0])
                         time.sleep(2)
-                    wait_and_click(driver, By.CSS_SELECTOR, 'li[data-id="00050007"]')
+                    wait_and_click(driver, By.CSS_SELECTOR, 'li[data-id="00060006"]')
                 except Exception as e:
                     print(f"  项目集菜单点击最终失败: {e}")
             print("项目集菜单点击完成，等待页面加载...")

@@ -119,7 +119,7 @@ def download_revenue(start_date, end_date, url="https://dui.epoint.com.cn/transf
                         page.wait_for_timeout(5000)
                         login_success = True
                         break
-                    if page.query_selector('li[data-id="00050007"]'):
+                    if page.query_selector('li[data-id="00060006"]'):
                         print("检测到菜单元素，登录成功！")
                         login_success = True
                         break
