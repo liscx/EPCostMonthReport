@@ -121,19 +121,43 @@ def match_contracts(cost_dict, summary_df):
     unmatched_red_rows = []
 
     # 从旧参考文件构建合同编号到专区码的映射
-    df_zone = pd.read_excel(REF_FILE_OLD, sheet_name='专区管控表', header=0, usecols=[0, 1, 2, 5, 11])
-    df_zone.columns = ['ref_contract', '专区码', '专区名称', '分公司', '商务']
+    df_zone = pd.read_excel(REF_FILE_OLD, sheet_name='专区管控表', header=0, usecols=[0, 1, 2, 5, 11, 15])
+    df_zone.columns = ['ref_contract', '专区码', '专区名称', '分公司', '商务', '专区状态']
     df_zone = df_zone.dropna(subset=['ref_contract'])
     df_zone['ref_contract'] = df_zone['ref_contract'].astype(str)
 
-    cid_to_zone = {}
+    # 先收集每个合同编号的所有记录（处理重复情况）
+    cid_records = {}
     for _, ref_row in df_zone.iterrows():
         ref_contract = str(ref_row['ref_contract'])
         zone_code = str(ref_row['专区码']) if pd.notna(ref_row['专区码']) else ''
+        zone_status = str(ref_row['专区状态']) if pd.notna(ref_row['专区状态']) else ''
         for cid in ref_contract.split('\n'):
             cid = cid.strip()
             if cid and cid.startswith('C'):
-                cid_to_zone[cid] = zone_code
+                if cid not in cid_records:
+                    cid_records[cid] = []
+                cid_records[cid].append({'专区码': zone_code, '专区状态': zone_status})
+
+    # 对重复合同：优先取非已下线的记录
+    cid_to_zone = {}
+    duplicates_marked = []
+    for cid, records in cid_records.items():
+        if len(records) == 1:
+            cid_to_zone[cid] = records[0]['专区码']
+        else:
+            # 有重复，优先取非已下线
+            active = [r for r in records if r['专区状态'] != '已下线']
+            if active:
+                cid_to_zone[cid] = active[0]['专区码']
+            else:
+                cid_to_zone[cid] = records[0]['专区码']
+            duplicates_marked.append(cid)
+
+    if duplicates_marked:
+        print(f"  [标记] 发现重复合同（已自动处理）: {len(duplicates_marked)} 个")
+        for cid in duplicates_marked:
+            print(f"    {cid}: {cid_records[cid]}")
 
     print(f"  旧参考文件专区码映射数量: {len(cid_to_zone)}")
 
@@ -222,24 +246,42 @@ def match_unmatched_ejy(cost_dict, matched_in_summary, summary_df):
     print(f"\n处理 projExport 未匹配合同，参考旧文件: {REF_FILE_OLD}")
 
     # 从旧参考文件构建合同编号到信息的映射
-    df_zone = pd.read_excel(REF_FILE_OLD, sheet_name='专区管控表', header=0, usecols=[0, 1, 2, 5, 11])
-    df_zone.columns = ['ref_contract', '专区码', '专区名称', '分公司', '商务']
+    df_zone = pd.read_excel(REF_FILE_OLD, sheet_name='专区管控表', header=0, usecols=[0, 1, 2, 5, 11, 15])
+    df_zone.columns = ['ref_contract', '专区码', '专区名称', '分公司', '商务', '专区状态']
     df_zone = df_zone.dropna(subset=['ref_contract'])
     df_zone['ref_contract'] = df_zone['ref_contract'].astype(str)
 
-    cid_to_info = {}
+    # 先收集每个合同编号的所有记录
+    cid_all_records = {}
     for _, ref_row in df_zone.iterrows():
         ref_contract = str(ref_row['ref_contract'])
         zone_code = str(ref_row['专区码']) if pd.notna(ref_row['专区码']) else ''
+        zone_status = str(ref_row['专区状态']) if pd.notna(ref_row['专区状态']) else ''
+        info = {
+            '专区码': zone_code,
+            '专区名称': str(ref_row['专区名称']) if pd.notna(ref_row['专区名称']) else '',
+            '分公司': str(ref_row['分公司']) if pd.notna(ref_row['分公司']) else '',
+            '商务': str(ref_row['商务']) if pd.notna(ref_row['商务']) else '',
+            '专区状态': zone_status,
+        }
         for cid in ref_contract.split('\n'):
             cid = cid.strip()
             if cid and cid.startswith('C'):
-                cid_to_info[cid] = {
-                    '专区码': zone_code,
-                    '专区名称': str(ref_row['专区名称']) if pd.notna(ref_row['专区名称']) else '',
-                    '分公司': str(ref_row['分公司']) if pd.notna(ref_row['分公司']) else '',
-                    '商务': str(ref_row['商务']) if pd.notna(ref_row['商务']) else '',
-                }
+                if cid not in cid_all_records:
+                    cid_all_records[cid] = []
+                cid_all_records[cid].append(info)
+
+    # 对重复合同：优先取非已下线的记录
+    cid_to_info = {}
+    for cid, records in cid_all_records.items():
+        if len(records) == 1:
+            cid_to_info[cid] = records[0]
+        else:
+            active = [r for r in records if r['专区状态'] != '已下线']
+            if active:
+                cid_to_info[cid] = active[0]
+            else:
+                cid_to_info[cid] = records[0]
 
     # 收集合同汇总表中已匹配的合同编号集合（用于排除）
     summary_cids = set()
