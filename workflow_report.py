@@ -8,7 +8,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 WORKFLOW = [
-    ('data_export_scripts.shouyi_export', '收益导出'),
+    # ('data_export_scripts.shouyi_export', '收益导出'),
     ('data_handle_scripts.fill_revenue', '收益回填'),
     ('data_handle_scripts.analyze_contracts', '合同分析'),
     ('data_handle_scripts.generate_report', '生成月报'),

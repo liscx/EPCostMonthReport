@@ -7,8 +7,11 @@ from datetime import datetime
 
 sys.stdout.reconfigure(encoding='utf-8')
 
+# 项目根目录（data_handle_scripts/ 的上一级）
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # 读取配置
-with open('config.yaml', 'r', encoding='utf-8') as f:
+with open(os.path.join(_PROJECT_ROOT, 'config.yaml'), 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
 # 数据年份：优先使用yaml配置，否则根据当前年份自动生成
@@ -81,7 +84,7 @@ def main():
     # 文件路径：支持 workflow 时间戳
     ts = os.environ.get('WORKFLOW_TIMESTAMP', '')
     suffix = f'_{ts}' if ts else ''
-    input_file = f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx'
+    input_file = os.path.join(_PROJECT_ROOT, f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx')
     output_file = input_file  # 原地更新
 
     df = pd.read_excel(input_file)

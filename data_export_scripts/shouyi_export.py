@@ -10,12 +10,15 @@ from feishu_notify import send_image as feishu_send_image
 
 sys.stdout.reconfigure(encoding='utf-8')
 
+# 项目根目录（data_export_scripts/ 的上一级）
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # 从环境变量读取目标 chat_id（agent 传入）
 GROUP_CHAT_ID = os.environ.get("FEISHU_NOTIFY_CHAT_ID", "")
 
 
 def load_config():
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.yaml'), 'r', encoding='utf-8') as f:
+    with open(os.path.join(_PROJECT_ROOT, 'config.yaml'), 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
 
@@ -36,7 +39,7 @@ def download_revenue(start_date, end_date, url="https://dui.epoint.com.cn/transf
     """
     start_str = start_date.replace('-', '')
     end_str = end_date.replace('-', '')
-    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '源数据/export')
+    output_dir = os.path.join(_PROJECT_ROOT, '源数据/export')
     os.makedirs(output_dir, exist_ok=True)
 
     save_path = os.path.join(output_dir, f'shouyi{start_str}-{end_str}.xlsx')

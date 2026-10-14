@@ -10,7 +10,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 WORKFLOW = [
-    ('data_export_scripts.workflow_data_export', '数据导出'),
+    # ('data_export_scripts.workflow_data_export', '数据导出'),
     ('data_handle_scripts.workflow_data_handle', '数据处理'),
 ]
 

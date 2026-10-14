@@ -9,8 +9,11 @@ from docx import Document
 sys.stdout.reconfigure(encoding='utf-8')
 warnings.filterwarnings('ignore', message='Workbook contains no default style')
 
+# 项目根目录（data_handle_scripts/ 的上一级）
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # 读取配置
-with open('config.yaml', 'r', encoding='utf-8') as f:
+with open(os.path.join(_PROJECT_ROOT, 'config.yaml'), 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
 start_date = config['date_range']['start_date']
@@ -23,13 +26,13 @@ def main():
     # 文件路径：支持 workflow 时间戳
     ts = os.environ.get('WORKFLOW_TIMESTAMP', '')
     suffix = f'_{ts}' if ts else ''
-    excel_file = f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx'
-    json_file = f'中间数据/统计数据{start_str}-{end_str}{suffix}.json'
-    template_file = 'Model/SaaSReportModel.docx'
-    output_file = f'结果数据/SaaS月报{start_str}-{end_str}{suffix}.docx'
+    excel_file = os.path.join(_PROJECT_ROOT, f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx')
+    json_file = os.path.join(_PROJECT_ROOT, f'中间数据/统计数据{start_str}-{end_str}{suffix}.json')
+    template_file = os.path.join(_PROJECT_ROOT, 'Model/SaaSReportModel.docx')
+    output_file = os.path.join(_PROJECT_ROOT, f'结果数据/SaaS月报{start_str}-{end_str}{suffix}.docx')
 
     # 确保输出目录存在
-    os.makedirs('结果数据', exist_ok=True)
+    os.makedirs(os.path.join(_PROJECT_ROOT, '结果数据'), exist_ok=True)
 
     # 读取JSON统计数据
     with open(json_file, 'r', encoding='utf-8') as f:

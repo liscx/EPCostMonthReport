@@ -10,9 +10,12 @@ from datetime import datetime
 
 sys.stdout.reconfigure(encoding='utf-8')
 
+# 项目根目录（data_handle_scripts/ 的上一级）
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 def load_config():
-    with open('config.yaml', 'r', encoding='utf-8') as f:
+    with open(os.path.join(_PROJECT_ROOT, 'config.yaml'), 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
 
@@ -31,12 +34,12 @@ def main():
         data_year_short = str(datetime.now().year)[2:]
     year_revenue_col = f'{data_year_short}年收益'
 
-    revenue_file = f'源数据/export/shouyi{start_str}-{end_str}.xlsx'
+    revenue_file = os.path.join(_PROJECT_ROOT, f'源数据/export/shouyi{start_str}-{end_str}.xlsx')
 
     # 支持 workflow 时间戳
     ts = os.environ.get('WORKFLOW_TIMESTAMP', '')
     suffix = f'_{ts}' if ts else ''
-    target_file = f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx'
+    target_file = os.path.join(_PROJECT_ROOT, f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx')
 
     print(f"收益文件: {revenue_file}")
     print(f"流程一输出: {target_file}")

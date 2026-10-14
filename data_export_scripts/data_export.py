@@ -43,14 +43,20 @@ signal.signal(signal.SIGINT, _graceful_shutdown)
 signal.signal(signal.SIGTERM, _graceful_shutdown)
 
 
+# 项目根目录（data_export_scripts/ 的上一级）
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 def load_config():
-    with open('config.yaml', 'r', encoding='utf-8') as f:
+    config_path = os.path.join(_PROJECT_ROOT, 'config.yaml')
+    with open(config_path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
 
 def load_projects():
     """加载项目列表，返回 [(项目名称, URL), ...] 格式"""
-    wb = openpyxl.load_workbook('projList.xlsx')
+    proj_path = os.path.join(_PROJECT_ROOT, 'projList.xlsx')
+    wb = openpyxl.load_workbook(proj_path)
     ws = wb.active
     projects = []
     for row in range(2, ws.max_row + 1):
@@ -557,14 +563,14 @@ def main():
     end_date = config['date_range']['end_date']
 
     driver = None
-    download_dir = os.path.join(os.getcwd(), "downloads")
+    download_dir = os.path.join(_PROJECT_ROOT, "downloads")
     os.makedirs(download_dir, exist_ok=True)
 
     # 根据日期范围自动生成文件名
     start_str = start_date.replace('-', '')
     end_str = end_date.replace('-', '')
-    master_file = f'源数据/export/projExport{start_str}-{end_str}.xlsx'
-    os.makedirs('源数据/export', exist_ok=True)
+    master_file = os.path.join(_PROJECT_ROOT, f'源数据/export/projExport{start_str}-{end_str}.xlsx')
+    os.makedirs(os.path.join(_PROJECT_ROOT, '源数据/export'), exist_ok=True)
     if os.path.exists(master_file):
         os.remove(master_file)
 
@@ -993,7 +999,7 @@ def main():
 
         # 回写链接到 projList.xlsx
         if project_urls:
-            wb_proj = openpyxl.load_workbook('projList.xlsx')
+            wb_proj = openpyxl.load_workbook(os.path.join(_PROJECT_ROOT, 'projList.xlsx'))
             ws_proj = wb_proj.active
             ws_proj.cell(row=1, column=2, value='链接')
             updated_count = 0
@@ -1002,7 +1008,7 @@ def main():
                 if name and name.strip() in project_urls:
                     ws_proj.cell(row=row, column=2, value=project_urls[name.strip()])
                     updated_count += 1
-            wb_proj.save('projList.xlsx')
+            wb_proj.save(os.path.join(_PROJECT_ROOT, 'projList.xlsx'))
             print(f"\n已回写 {updated_count} 个链接到 projList.xlsx")
 
     return driver

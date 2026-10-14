@@ -10,8 +10,11 @@ from openpyxl.styles import PatternFill
 sys.stdout.reconfigure(encoding='utf-8')
 warnings.filterwarnings('ignore', message='Workbook contains no default style')
 
+# 项目根目录（data_handle_scripts/ 的上一级）
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # 读取配置生成文件名
-with open('config.yaml', 'r', encoding='utf-8') as f:
+with open(os.path.join(_PROJECT_ROOT, 'config.yaml'), 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
 # 数据年份：优先使用yaml配置，否则根据当前年份自动生成
@@ -28,14 +31,28 @@ end_date = config['date_range']['end_date']
 start_str = start_date.replace('-', '')
 end_str = end_date.replace('-', '')
 
-SOURCE_FILE = f'源数据/export/projExport{start_str}-{end_str}.xlsx'
-REF_FILE = '源数据/合同汇总表.xlsx'
-REF_FILE_OLD = '源数据/新点电子交易专区&项目跟进表.xlsx'
+SOURCE_FILE = os.path.join(_PROJECT_ROOT, f'源数据/export/projExport{start_str}-{end_str}.xlsx')
+REF_FILE = os.path.join(_PROJECT_ROOT, '源数据/合同汇总表.xlsx')
+REF_FILE_OLD = os.path.join(_PROJECT_ROOT, '源数据/新点电子交易专区&项目跟进表.xlsx')
 
-# 按列索引定位 projExport.xlsx
-COL_CONTRACT = 20   # 合同编号
-COL_COST = 12       # 实际人工成本
-COL_BUDGET = 23     # 任务预算使用
+# 按列名定位 projExport.xlsx（列名不存在时回退到历史列索引）
+COL_CONTRACT = 21   # 合同编号（历史索引）
+COL_COST = 13       # 实际人工成本（历史索引）
+COL_BUDGET = 24     # 任务预算使用（历史索引）
+
+
+def _get_columns(df):
+    """按列名获取三列，列名缺失时回退到历史索引"""
+    cols = {'合同编号': '合同编号', '实际人工成本': '实际人工成本', '任务预算使用': '任务预算使用'}
+    for name, col in cols.items():
+        if col not in df.columns:
+            idx = {'合同编号': COL_CONTRACT, '实际人工成本': COL_COST, '任务预算使用': COL_BUDGET}[name]
+            if idx < len(df.columns):
+                print(f"  [警告] 未找到列「{col}」，回退使用第 {idx} 列: {repr(df.columns[idx])}")
+                cols[name] = df.columns[idx]
+            else:
+                return None
+    return cols
 
 
 def load_contracts_from_ejy():
@@ -50,9 +67,14 @@ def load_contracts_from_ejy():
             print(f"  跳过空Sheet: {sheet_name}")
             continue
 
-        contract = df.iloc[:, COL_CONTRACT]
-        cost = pd.to_numeric(df.iloc[:, COL_COST], errors='coerce').fillna(0)
-        budget = pd.to_numeric(df.iloc[:, COL_BUDGET], errors='coerce').fillna(0)
+        cols = _get_columns(df)
+        if cols is None:
+            print(f"  跳过Sheet（缺少关键列）: {sheet_name}")
+            continue
+
+        contract = df[cols['合同编号']]
+        cost = pd.to_numeric(df[cols['实际人工成本']], errors='coerce').fillna(0)
+        budget = pd.to_numeric(df[cols['任务预算使用']], errors='coerce').fillna(0)
 
         temp = pd.DataFrame({
             '合同编号': contract,
@@ -120,9 +142,17 @@ def match_contracts(cost_dict, summary_df):
     matched_rows = []
     unmatched_red_rows = []
 
-    # 从旧参考文件构建合同编号到专区码的映射
-    df_zone = pd.read_excel(REF_FILE_OLD, sheet_name='专区管控表', header=0, usecols=[0, 1, 2, 5, 11, 15])
-    df_zone.columns = ['ref_contract', '专区码', '专区名称', '分公司', '商务', '专区状态']
+    # 从旧参考文件构建合同编号到专区码的映射（按列名读取，避免硬编码索引）
+    df_zone = pd.read_excel(REF_FILE_OLD, sheet_name='专区管控表', header=0)
+    df_zone = df_zone.rename(columns={
+        'Unnamed: 0': 'ref_contract',
+        '专区码': '专区码',
+        ' 专区名称': '专区名称',
+        '省份（已按新组织调整）': '分公司',
+        '商务': '商务',
+        '专区状态': '专区状态',
+    })
+    df_zone = df_zone[['ref_contract', '专区码', '专区名称', '分公司', '商务', '专区状态']]
     df_zone = df_zone.dropna(subset=['ref_contract'])
     df_zone['ref_contract'] = df_zone['ref_contract'].astype(str)
 
@@ -245,9 +275,17 @@ def match_unmatched_ejy(cost_dict, matched_in_summary, summary_df):
     """处理 projExport 中未在合同汇总表匹配到的合同（黄色底纹），尝试从旧参考文件补充信息"""
     print(f"\n处理 projExport 未匹配合同，参考旧文件: {REF_FILE_OLD}")
 
-    # 从旧参考文件构建合同编号到信息的映射
-    df_zone = pd.read_excel(REF_FILE_OLD, sheet_name='专区管控表', header=0, usecols=[0, 1, 2, 5, 11, 15])
-    df_zone.columns = ['ref_contract', '专区码', '专区名称', '分公司', '商务', '专区状态']
+    # 从旧参考文件构建合同编号到信息的映射（按列名读取，避免硬编码索引）
+    df_zone = pd.read_excel(REF_FILE_OLD, sheet_name='专区管控表', header=0)
+    df_zone = df_zone.rename(columns={
+        'Unnamed: 0': 'ref_contract',
+        '专区码': '专区码',
+        ' 专区名称': '专区名称',
+        '省份（已按新组织调整）': '分公司',
+        '商务': '商务',
+        '专区状态': '专区状态',
+    })
+    df_zone = df_zone[['ref_contract', '专区码', '专区名称', '分公司', '商务', '专区状态']]
     df_zone = df_zone.dropna(subset=['ref_contract'])
     df_zone['ref_contract'] = df_zone['ref_contract'].astype(str)
 
@@ -319,7 +357,7 @@ def main():
     # 文件路径：支持 workflow 时间戳
     ts = os.environ.get('WORKFLOW_TIMESTAMP', '')
     suffix = f'_{ts}' if ts else ''
-    output_file = f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx'
+    output_file = os.path.join(_PROJECT_ROOT, f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx')
 
     # 加载 projExport 数据（主数据源）
     cost_dict = load_contracts_from_ejy()

@@ -74,6 +74,34 @@ def create_driver() -> webdriver.Chrome:
 
 
 # ── DOM 解析 ─────────────────────────────────────────────
+def detect_col_indices(driver: webdriver.Chrome) -> list[int]:
+    """从表头行动态检测列位置，失败时回退到硬编码索引"""
+    try:
+        header_cells = driver.find_elements(By.CSS_SELECTOR, "tr.mini-grid-headerCell td")
+        if not header_cells:
+            header_cells = driver.find_elements(By.CSS_SELECTOR, ".mini-grid-header td")
+        header_texts = []
+        for td in header_cells:
+            inner = td.find_elements(By.CSS_SELECTOR, ".mini-grid-cell-inner")
+            text = inner[0].text.strip() if inner else td.text.strip()
+            header_texts.append(text)
+
+        # 尝试按列名匹配
+        name_to_idx = {name: i for i, name in enumerate(header_texts)}
+        indices = []
+        for name in COL_NAMES:
+            if name in name_to_idx:
+                indices.append(name_to_idx[name])
+            else:
+                print(f"  表头未找到列 '{name}'，使用硬编码索引")
+                return COL_INDICES
+        print(f"  从表头检测到列位置: {dict(zip(COL_NAMES, indices))}")
+        return indices
+    except Exception as e:
+        print(f"  表头检测失败({e})，使用硬编码索引")
+        return COL_INDICES
+
+
 def wait_for_rows(driver: webdriver.Chrome, timeout: int = 30) -> None:
     """等待表格行渲染完毕"""
     WebDriverWait(driver, timeout).until(
@@ -98,16 +126,18 @@ def wait_rows_stable(driver: webdriver.Chrome, timeout: int = 30, stable_sec: fl
         time.sleep(0.5)
 
 
-def parse_current_page(driver: webdriver.Chrome, existing_map: dict) -> int:
+def parse_current_page(driver: webdriver.Chrome, existing_map: dict, col_indices: list[int] = None) -> int:
     """解析当前页所有渲染出来的行，并存入 existing_map。返回新增数量。"""
+    if col_indices is None:
+        col_indices = COL_INDICES
     rows = driver.find_elements(By.CSS_SELECTOR, "tr.mini-grid-row")
     added = 0
     for row in rows:
         tds = row.find_elements(By.TAG_NAME, "td")
-        if len(tds) <= max(COL_INDICES):
+        if len(tds) <= max(col_indices):
             continue
         record = {}
-        for col_name, td_idx in zip(COL_NAMES, COL_INDICES):
+        for col_name, td_idx in zip(COL_NAMES, col_indices):
             td = tds[td_idx]
             inner = td.find_elements(By.CSS_SELECTOR, ".mini-grid-cell-inner")
             text = inner[0].text.strip() if inner else td.text.strip()
@@ -163,6 +193,7 @@ def set_page_size_via_ui(driver: webdriver.Chrome, size: int) -> None:
             if str(size) == opt.text.strip():
                 opt.click()
                 print(f"  已点击选项 {size}")
+                time.sleep(20)
                 return
         print(f"  未能直接找到选项 {size}，尝试通过 JS 补救...")
         driver.execute_script(f"var g=mini.get('datagrid'); if(g) g.setPageSize({size});")
@@ -218,16 +249,17 @@ def crawl() -> list[dict]:
 
         page = 1
         all_records_map = {} # 专区编号 -> record
+        col_indices = detect_col_indices(driver)
         while True:
             print(f"  正在处理第 {page} 页...")
-            
+            time.sleep(20)
             # 由于是虚拟滚动/懒加载，需要边滚动边收集
             container = driver.find_element(By.CSS_SELECTOR, ".mini-grid-rows-view")
             last_top = -1
             added_this_page = 0
             while True:
                 # 解析当前可见行
-                new_count = parse_current_page(driver, all_records_map)
+                new_count = parse_current_page(driver, all_records_map, col_indices)
                 added_this_page += new_count
                 
                 # 滚动
@@ -236,7 +268,7 @@ def crawl() -> list[dict]:
                 curr_top = driver.execute_script("return arguments[0].scrollTop;", container)
                 if curr_top == last_top:
                     # 到底了，最后再整页解析一次确保没漏
-                    parse_current_page(driver, all_records_map)
+                    parse_current_page(driver, all_records_map, col_indices)
                     break
                 last_top = curr_top
             
