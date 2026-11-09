@@ -557,6 +557,14 @@ def export_by_url(driver, project_name, url, start_date, end_date, download_dir,
 
 
 def main():
+    # 统一日志：把本次运行的完整控制台输出落盘到 日志/ 目录
+    try:
+        sys.path.insert(0, _PROJECT_ROOT)
+        from log_utils import attach_standalone_log
+        attach_standalone_log('数据导出')
+    except Exception as _log_err:
+        print(f"[WARN] 日志落盘初始化失败，本次不写日志文件: {_log_err}")
+
     config = load_config()
     projects = load_projects()
     start_date = config['date_range']['start_date']
@@ -959,7 +967,11 @@ def main():
 
         # 保存数据为空的项目到日志文件
         if empty_projects:
-            log_file = os.path.join(os.getcwd(), "logs.txt")
+            try:
+                from log_utils import log_dir_for_file
+                log_file = log_dir_for_file('空数据项目清单.txt')
+            except Exception:
+                log_file = os.path.join(os.getcwd(), "logs.txt")
             with open(log_file, 'w', encoding='utf-8') as f:
                 f.write(f"数据为空的项目 ({len(empty_projects)} 个):\n")
                 for project in empty_projects:

@@ -81,6 +81,14 @@ def calc_quota(row):
 
 
 def main():
+    # 统一日志：把本次运行的完整控制台输出落盘到 日志/ 目录
+    try:
+        sys.path.insert(0, _PROJECT_ROOT)
+        from log_utils import attach_standalone_log
+        attach_standalone_log('计算核定总额')
+    except Exception as _log_err:
+        print(f"[WARN] 日志落盘初始化失败，本次不写日志文件: {_log_err}")
+
     # 文件路径：支持 workflow 时间戳
     ts = os.environ.get('WORKFLOW_TIMESTAMP', '')
     suffix = f'_{ts}' if ts else ''

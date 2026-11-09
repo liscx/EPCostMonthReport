@@ -17,6 +17,14 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def main():
+    # 统一日志：把本次运行的完整控制台输出落盘到 日志/ 目录
+    try:
+        sys.path.insert(0, BASE_DIR)
+        from log_utils import attach_standalone_log
+        attach_standalone_log('打包月报')
+    except Exception as _log_err:
+        print(f"[WARN] 日志落盘初始化失败，本次不写日志文件: {_log_err}")
+
     # 读取配置
     with open(os.path.join(BASE_DIR, 'config.yaml'), 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
@@ -46,6 +54,9 @@ def main():
 
     # 依赖数据
     all_files.append(os.path.join(BASE_DIR, '源数据', '合同汇总表.xlsx'))
+    # 新版任务明细导出（单表扁平格式，结束日用 glob 兼容月末差一天的情况）
+    all_files.extend(glob.glob(os.path.join(BASE_DIR, '源数据', 'export', f'任务明细Export{start_str}-*.xlsx')))
+    # 旧版 projExport 保留兼容（目录里存在才会被打包）
     all_files.extend(glob.glob(os.path.join(BASE_DIR, '源数据', 'export', f'projExport{start_str}-{end_str}*.xlsx')))
     all_files.extend(glob.glob(os.path.join(BASE_DIR, '源数据', 'export', f'shouyi{start_str}-{end_str}*.xlsx')))
 

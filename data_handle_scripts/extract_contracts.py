@@ -1,4 +1,5 @@
 import sys
+import glob
 import pandas as pd
 import warnings
 import yaml
@@ -31,68 +32,77 @@ end_date = config['date_range']['end_date']
 start_str = start_date.replace('-', '')
 end_str = end_date.replace('-', '')
 
-SOURCE_FILE = os.path.join(_PROJECT_ROOT, f'源数据/export/projExport{start_str}-{end_str}.xlsx')
+# 任务明细导出文件（新格式：单表扁平，所有项目在一张表，靠「项目名称」列区分）
+# 注意：文件名的结束日可能与实际月末差一天（如 ...20261030 实际含 10-31 数据），
+# 因此按起始日 glob 匹配取最新一份，读取后再按数据内的「任务实际完成时间」过滤
+SOURCE_PATTERN = os.path.join(_PROJECT_ROOT, f'源数据/export/任务明细Export{start_str}-*.xlsx')
 REF_FILE = os.path.join(_PROJECT_ROOT, '源数据/合同汇总表.xlsx')
 REF_FILE_OLD = os.path.join(_PROJECT_ROOT, '源数据/新点电子交易专区&项目跟进表.xlsx')
 
-# 按列名定位 projExport.xlsx（列名不存在时回退到历史列索引）
-COL_CONTRACT = 21   # 合同编号（历史索引）
-COL_COST = 13       # 实际人工成本（历史索引）
-COL_BUDGET = 24     # 任务预算使用（历史索引）
 
-
-def _get_columns(df):
-    """按列名获取三列，列名缺失时回退到历史索引"""
-    cols = {'合同编号': '合同编号', '实际人工成本': '实际人工成本', '任务预算使用': '任务预算使用'}
-    for name, col in cols.items():
-        if col not in df.columns:
-            idx = {'合同编号': COL_CONTRACT, '实际人工成本': COL_COST, '任务预算使用': COL_BUDGET}[name]
-            if idx < len(df.columns):
-                print(f"  [警告] 未找到列「{col}」，回退使用第 {idx} 列: {repr(df.columns[idx])}")
-                cols[name] = df.columns[idx]
-            else:
-                return None
-    return cols
+def _resolve_source_file():
+    """按起始日 glob 定位任务明细导出文件，取最新一份"""
+    files = sorted(glob.glob(SOURCE_PATTERN), key=os.path.getmtime)
+    return files[-1] if files else None
 
 
 def load_contracts_from_ejy():
-    """从 projExport.xlsx 提取C开头的合同编号及汇总数据，返回 {合同编号: {实际人工成本, 任务预算使用}} 字典"""
-    xls = pd.ExcelFile(SOURCE_FILE)
-    print(f"源文件: {SOURCE_FILE}, 共 {len(xls.sheet_names)} 个Sheet")
+    """从 任务明细Export（单表扁平格式）提取C开头合同编号及汇总数据，返回 {合同编号: {实际人工成本, 任务预算使用}} 字典"""
+    source_file = _resolve_source_file()
+    if not source_file:
+        print(f"未找到任务明细导出文件，匹配模式: {SOURCE_PATTERN}")
+        print("请确认 OA 任务明细已导出并放入 源数据/export/ 目录")
+        return None
 
-    all_data = []
-    for sheet_name in xls.sheet_names:
-        df = pd.read_excel(xls, sheet_name=sheet_name, header=0)
-        if df.empty or len(df.columns) <= max(COL_CONTRACT, COL_COST, COL_BUDGET):
-            print(f"  跳过空Sheet: {sheet_name}")
-            continue
+    print(f"源文件: {source_file}")
+    df = pd.read_excel(source_file)
+    print(f"  总行数: {len(df)}")
 
-        cols = _get_columns(df)
-        if cols is None:
-            print(f"  跳过Sheet（缺少关键列）: {sheet_name}")
-            continue
+    # 按任务实际完成时间过滤到配置区间（文件名日期仅作参考，以数据内日期为准）
+    if '任务实际完成时间' in df.columns:
+        completion = pd.to_datetime(df['任务实际完成时间'], errors='coerce')
+        start_ts = pd.Timestamp(start_date)
+        end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1)
+        before = len(df)
+        df = df[(completion >= start_ts) & (completion < end_ts)].copy()
+        print(f"  按任务实际完成时间过滤 [{start_date} ~ {end_date}]: {before} -> {len(df)} 行")
+    else:
+        print("  [警告] 缺少「任务实际完成时间」列，跳过日期过滤")
 
-        contract = df[cols['合同编号']]
-        cost = pd.to_numeric(df[cols['实际人工成本']], errors='coerce').fillna(0)
-        budget = pd.to_numeric(df[cols['任务预算使用']], errors='coerce').fillna(0)
+    # 列定位：新格式成本列为「实际任务成本」，兼容旧列名「实际人工成本」
+    cost_col = next((c for c in ('实际任务成本', '实际人工成本') if c in df.columns), None)
+    # 预算列：经与旧版 projExport 任务级对账验证，旧「任务预算使用」对应新「任务预算总额」
+    # （新「任务预算使用」是扣减后的另一口径，数值偏小，勿用；总额为空的行使用列恒为0，fillna(0)即可）
+    budget_col = next((c for c in ('任务预算总额', '任务预算使用') if c in df.columns), None)
+    if '合同编号' not in df.columns or cost_col is None or budget_col is None:
+        print("  [错误] 缺少关键列（合同编号/成本列/预算列），无法提取")
+        return None
+    print(f"  成本列: {cost_col}, 预算列: {budget_col}")
 
-        temp = pd.DataFrame({
-            '合同编号': contract,
-            '实际人工成本': cost,
-            '任务预算使用': budget,
-        })
-        temp = temp[temp['合同编号'].notna() & (temp['合同编号'] != '')]
-        temp = temp[temp['合同编号'].astype(str).str.startswith('C')]
-        if not temp.empty:
-            all_data.append(temp)
-            print(f"  {sheet_name}: {len(temp)} 条记录")
+    contract = df['合同编号'].astype(str).str.strip()
+    cost = pd.to_numeric(df[cost_col], errors='coerce').fillna(0)
+    budget = pd.to_numeric(df[budget_col], errors='coerce').fillna(0)
 
-    if not all_data:
+    temp = pd.DataFrame({
+        '合同编号': contract,
+        '实际人工成本': cost,
+        '任务预算使用': budget,
+    })
+    if '项目名称' in df.columns:
+        temp.insert(1, '项目名称', df['项目名称'].values)
+    temp = temp[(temp['合同编号'] != '') & (temp['合同编号'] != 'nan')]
+    temp = temp[temp['合同编号'].str.startswith('C')]
+
+    if temp.empty:
         print("未找到任何数据")
         return None
 
-    merged = pd.concat(all_data, ignore_index=True)
-    agg = merged.groupby('合同编号', as_index=False).agg(
+    # 项目级记录数日志（对应旧版按Sheet输出的日志）
+    if '项目名称' in temp.columns:
+        for name, cnt in temp['项目名称'].value_counts().items():
+            print(f"  {name}: {cnt} 条记录")
+
+    agg = temp.groupby('合同编号', as_index=False).agg(
         实际人工成本=('实际人工成本', 'sum'),
         任务预算使用=('任务预算使用', 'sum'),
     )
@@ -136,8 +146,8 @@ def parse_contract_ids(contract_id):
 
 def match_contracts(cost_dict, summary_df):
     """按照合同汇总表顺序匹配，返回 (matched, unmatched_red)
-    - matched: projExport和合同汇总表都能匹配到的行
-    - unmatched_red: 合同汇总表有但projExport没有的行（红色底纹）
+    - matched: 任务明细和合同汇总表都能匹配到的行
+    - unmatched_red: 合同汇总表有但任务明细没有的行（红色底纹）
     """
     matched_rows = []
     unmatched_red_rows = []
@@ -199,7 +209,7 @@ def match_contracts(cost_dict, summary_df):
 
         cids = parse_contract_ids(contract_id)
         if not cids:
-            # 无法解析，作为红色（合同汇总表有，projExport无）
+            # 无法解析，作为红色（合同汇总表有，任务明细无）
             unmatched_red_rows.append({
                 '合同编号': contract_id,
                 '实际人工成本': '',
@@ -215,7 +225,7 @@ def match_contracts(cost_dict, summary_df):
             })
             continue
 
-        # 在 projExport 中查找
+        # 在 任务明细 中查找
         matched_cids_in_row = []
         total_budget = 0
         for cid in cids:
@@ -253,7 +263,7 @@ def match_contracts(cost_dict, summary_df):
                 '核定总额计算规则': str(row.get('核定总额计算规则', '')) if pd.notna(row.get('核定总额计算规则', '')) else '',
             })
         else:
-            # 合同汇总表有，projExport没有 -> 红色底纹
+            # 合同汇总表有，任务明细没有 -> 红色底纹
             unmatched_red_rows.append({
                 '合同编号': contract_id,
                 '实际人工成本': '',
@@ -272,8 +282,8 @@ def match_contracts(cost_dict, summary_df):
 
 
 def match_unmatched_ejy(cost_dict, matched_in_summary, summary_df):
-    """处理 projExport 中未在合同汇总表匹配到的合同（黄色底纹），尝试从旧参考文件补充信息"""
-    print(f"\n处理 projExport 未匹配合同，参考旧文件: {REF_FILE_OLD}")
+    """处理 任务明细 中未在合同汇总表匹配到的合同（黄色底纹），尝试从旧参考文件补充信息"""
+    print(f"\n处理 任务明细 未匹配合同，参考旧文件: {REF_FILE_OLD}")
 
     # 从旧参考文件构建合同编号到信息的映射（按列名读取，避免硬编码索引）
     df_zone = pd.read_excel(REF_FILE_OLD, sheet_name='专区管控表', header=0)
@@ -349,17 +359,25 @@ def match_unmatched_ejy(cost_dict, matched_in_summary, summary_df):
             '核定总额计算规则': '',
         })
 
-    print(f"  projExport 未匹配: {len(yellow_rows)} 行")
+    print(f"  任务明细 未匹配: {len(yellow_rows)} 行")
     return yellow_rows
 
 
 def main():
+    # 统一日志：把本次运行的完整控制台输出落盘到 日志/ 目录
+    try:
+        sys.path.insert(0, _PROJECT_ROOT)
+        from log_utils import attach_standalone_log
+        attach_standalone_log('合同匹配')
+    except Exception as _log_err:
+        print(f"[WARN] 日志落盘初始化失败，本次不写日志文件: {_log_err}")
+
     # 文件路径：支持 workflow 时间戳
     ts = os.environ.get('WORKFLOW_TIMESTAMP', '')
     suffix = f'_{ts}' if ts else ''
     output_file = os.path.join(_PROJECT_ROOT, f'中间数据/合同汇总{start_str}-{end_str}{suffix}.xlsx')
 
-    # 加载 projExport 数据（主数据源）
+    # 加载 任务明细 数据（主数据源）
     cost_dict = load_contracts_from_ejy()
     if cost_dict is None:
         return
@@ -369,14 +387,14 @@ def main():
 
     # 第一步：按合同汇总表顺序匹配
     # matched_rows: 两边都能匹配到
-    # unmatched_red_rows: 合同汇总表有，projExport没有（红色底纹）
+    # unmatched_red_rows: 合同汇总表有，任务明细没有（红色底纹）
     matched_rows, unmatched_red_rows = match_contracts(cost_dict, summary_df)
 
     print(f"\n合同汇总表匹配结果:")
     print(f"  匹配成功（绿色）: {len(matched_rows)} 行")
     print(f"  合同汇总表未匹配（红色）: {len(unmatched_red_rows)} 行")
 
-    # 第二步：处理 projExport 中未在合同汇总表匹配到的合同（黄色底纹）
+    # 第二步：处理 任务明细 中未在合同汇总表匹配到的合同（黄色底纹）
     yellow_rows = match_unmatched_ejy(cost_dict, set(), summary_df)
 
     # 合并：先按合同汇总表顺序（匹配+红色），再追加黄色
@@ -386,7 +404,7 @@ def main():
     print(f"\n最终结果:")
     print(f"  匹配成功（绿色）: {len(matched_rows)} 行")
     print(f"  合同汇总表未匹配（红色）: {len(unmatched_red_rows)} 行")
-    print(f"  projExport 未匹配（黄色）: {len(yellow_rows)} 行")
+    print(f"  任务明细 未匹配（黄色）: {len(yellow_rows)} 行")
 
     # 写入Excel并添加底纹
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
@@ -401,12 +419,12 @@ def main():
         matched_end = len(matched_rows)
         red_end = matched_end + len(unmatched_red_rows)
 
-        # 红色：合同汇总表有，projExport没有
+        # 红色：合同汇总表有，任务明细没有
         for row_idx in range(matched_end + 2, red_end + 2):
             for col_idx in range(1, len(result.columns) + 1):
                 worksheet.cell(row=row_idx, column=col_idx).fill = red_fill
 
-        # 黄色：projExport有，合同汇总表没有
+        # 黄色：任务明细有，合同汇总表没有
         for row_idx in range(red_end + 2, len(result) + 2):
             for col_idx in range(1, len(result.columns) + 1):
                 worksheet.cell(row=row_idx, column=col_idx).fill = yellow_fill

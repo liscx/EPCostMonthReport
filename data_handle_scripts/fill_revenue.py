@@ -20,6 +20,14 @@ def load_config():
 
 
 def main():
+    # 统一日志：把本次运行的完整控制台输出落盘到 日志/ 目录
+    try:
+        sys.path.insert(0, _PROJECT_ROOT)
+        from log_utils import attach_standalone_log
+        attach_standalone_log('收益回填')
+    except Exception as _log_err:
+        print(f"[WARN] 日志落盘初始化失败，本次不写日志文件: {_log_err}")
+
     config = load_config()
     start_date = config['date_range']['start_date']
     end_date = config['date_range']['end_date']

@@ -203,6 +203,14 @@ def save_log(log_lines):
 
 def main():
     """主函数"""
+    # 统一日志：把本次运行的完整控制台输出落盘到 日志/ 目录
+    try:
+        sys.path.insert(0, BASE_DIR)
+        from log_utils import attach_standalone_log
+        attach_standalone_log('更新合同汇总数据')
+    except Exception as _log_err:
+        print(f"[WARN] 日志落盘初始化失败，本次不写日志文件: {_log_err}")
+
     print("=" * 60)
     print("更新合同汇总源数据")
     print("=" * 60)

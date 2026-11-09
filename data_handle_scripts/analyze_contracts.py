@@ -41,6 +41,14 @@ end_str = end_date.replace('-', '')
 
 
 def main():
+    # 统一日志：把本次运行的完整控制台输出落盘到 日志/ 目录
+    try:
+        sys.path.insert(0, _PROJECT_ROOT)
+        from log_utils import attach_standalone_log
+        attach_standalone_log('合同分析')
+    except Exception as _log_err:
+        print(f"[WARN] 日志落盘初始化失败，本次不写日志文件: {_log_err}")
+
     # 文件路径：支持 workflow 时间戳
     ts = os.environ.get('WORKFLOW_TIMESTAMP', '')
     suffix = f'_{ts}' if ts else ''
@@ -50,8 +58,8 @@ def main():
     # 先用 openpyxl 读取底纹，区分红色和黄色行
     wb_check = openpyxl.load_workbook(input_file)
     ws_check = wb_check['合同汇总'] if '合同汇总' in wb_check.sheetnames else wb_check.active
-    red_rows = set()    # 红色底纹行号（1-indexed）：合同汇总表有，projExport没有
-    yellow_rows = set() # 黄色底纹行号（1-indexed）：projExport有，合同汇总表没有
+    red_rows = set()    # 红色底纹行号（1-indexed）：合同汇总表有，任务明细没有
+    yellow_rows = set() # 黄色底纹行号（1-indexed）：任务明细有，合同汇总表没有
     for row_idx in range(2, ws_check.max_row + 1):
         cell = ws_check.cell(row=row_idx, column=1)
         fill = cell.fill

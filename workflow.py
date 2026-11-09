@@ -7,7 +7,10 @@ from datetime import datetime, date
 import calendar
 
 sys.stdout.reconfigure(encoding='utf-8')
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+os.chdir(_PROJECT_ROOT)
+
+from log_utils import RunLogger
 
 WORKFLOW = [
     # ('data_export_scripts.workflow_data_export', '数据导出'),
@@ -35,23 +38,34 @@ def main():
             yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
         print(f"[auto_range] 日期已自动更新: {auto_start} ~ {auto_end}")
 
+    rl = RunLogger(title='完整月报工作流')
     print(f"\n{'#'*60}")
     print(f"# 完整月报工作流")
     print(f"# 时间戳: {ts}")
+    print(f"# 日志目录: {rl.run_dir}")
     print(f"{'#'*60}")
 
+    failed = False
     for idx, (module_name, step_name) in enumerate(WORKFLOW, 1):
-        print(f"\n{'='*60}")
-        print(f"[{idx}/{len(WORKFLOW)}] {step_name} ({module_name}.py)")
-        print(f"{'='*60}")
+        with rl.step(step_name) as st:
+            print(f"\n{'='*60}")
+            print(f"[{idx}/{len(WORKFLOW)}] {step_name} ({module_name}.py)")
+            print(f"{'='*60}")
 
-        try:
-            mod = importlib.import_module(module_name)
-            mod.main()
-            print(f"\n[OK] {step_name} 完成")
-        except Exception as e:
-            print(f"\n[FAIL] {step_name} 失败: {e}")
-            traceback.print_exc()
+            try:
+                mod = importlib.import_module(module_name)
+                mod.main()
+                print(f"\n[OK] {step_name} 完成")
+                st.ok()
+            except Exception as e:
+                print(f"\n[FAIL] {step_name} 失败: {e}")
+                traceback.print_exc()
+                st.fail(e)
+                failed = True
+
+        if failed:
+            print(f"\n[FAIL] 工作流中断于第 {idx} 步: {step_name}")
+            rl.finish('失败')
             sys.exit(1)
 
     # 输出最终文件路径
@@ -66,7 +80,10 @@ def main():
 
     print(f"\n{'#'*60}")
     print(f"# 完整月报工作流完成")
+    print(f"# 日志目录: {rl.run_dir}")
     print(f"{'#'*60}")
+    rl.finish('完成')
+    rl.note(f'REPORT_FILE:{os.path.abspath(report_file)}')
     print(f"REPORT_FILE:{os.path.abspath(report_file)}")
 
 
